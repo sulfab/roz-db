@@ -32,13 +32,32 @@ const ITEM_INFO_CANDIDATES = [
  */
 const DISCOVERY_LIMIT = 12
 const DISCOVERY_MIN_SIZE = 4096
+/** Une base d'items complete pese au moins cela ; en deca, c'est autre chose. */
+const BIG_FILE_SIZE = 200_000
+const BIG_FILE_LIMIT = 15
 
+function bySizeDesc(a, b) { return b.size - a.size }
+
+/**
+ * Deux passes. D'abord les fichiers dont le nom evoque les items. Puis, si
+ * aucun n'a donne de table, les plus gros fichiers Lua du client : sur un
+ * client ou le nom attendu n'existe pas, la base d'items reste de loin le plus
+ * gros fichier de donnees, quel que soit son nom.
+ */
 function discoverItemFiles(vfs) {
   return vfs
     .list((key) => /item.*\.(lub|lua)$/.test(key) && !/table\.txt$/.test(key))
     .filter((entry) => entry.size >= DISCOVERY_MIN_SIZE)
-    .sort((a, b) => b.size - a.size)
+    .sort(bySizeDesc)
     .slice(0, DISCOVERY_LIMIT)
+}
+
+function discoverBigLuaFiles(vfs) {
+  return vfs
+    .list((key) => /\.(lub|lua)$/.test(key))
+    .filter((entry) => entry.size >= BIG_FILE_SIZE)
+    .sort(bySizeDesc)
+    .slice(0, BIG_FILE_LIMIT)
 }
 
 const TEXT_TABLES = {
@@ -102,11 +121,15 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
   const read = (entry) => {
     try { return vfs.read(entry.name) } catch { return null }
   }
-  for (const entry of discoverItemFiles(vfs)) {
-    if (attempts.some((a) => a.path === entry.name)) continue
-    const buffer = read(entry)
-    if (buffer) attempts.push({ path: entry.name, buffer, size: entry.size })
+  const addAll = (entries) => {
+    for (const entry of entries) {
+      if (attempts.some((a) => a.path === entry.name)) continue
+      const buffer = read(entry)
+      if (buffer) attempts.push({ path: entry.name, buffer, size: entry.size })
+    }
   }
+  addAll(discoverItemFiles(vfs))
+  addAll(discoverBigLuaFiles(vfs))
 
   if (!attempts.length) {
     warnings.push(`Aucun fichier d'items trouve (cherche : ${ITEM_INFO_CANDIDATES.join(', ')})`)
@@ -133,8 +156,11 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
     }
 
     if (!winner) {
-      const detail = tried.slice(0, 4)
-        .map((t) => `${t.path}${t.error ? ` (${t.error})` : ''}`)
+      const detail = tried.slice(0, 6)
+        .map((t) => {
+          const size = attempts.find((a) => a.path === t.path)?.size
+          return `${t.path}${size ? ` (${Math.round(size / 1024)} ko)` : ''}${t.error ? ` [${t.error}]` : ''}`
+        })
         .join(', ')
       warnings.push(
         `Aucune table d'items reconnue parmi ${tried.length} fichier(s) : ${detail}. ` +

@@ -137,6 +137,14 @@ export function extractMobs(vfs, { encoding = 'auto' } = {}) {
   // generique. Pour la jointure avec la navigation, elles n'ont pas a decider :
   // un sprite present dans un fichier de monstres est un monstre.
   const spriteToId = new Map()
+
+  // npcidentity.lub nomme chaque monstre JT_<SPRITE> : la constante donne donc
+  // un sprite, y compris pour les monstres absents de jobname.lub.
+  for (const [name, id] of constants) {
+    const sprite = name.replace(/^JT_/, '').toUpperCase()
+    if (sprite) spriteToId.set(sprite, id)
+  }
+  // jobname.lub est plus sur quand il existe : il ecrase la deduction.
   for (const [id, sprite] of sprites) {
     if (typeof sprite === 'string' && sprite) spriteToId.set(sprite.toUpperCase(), id)
   }

@@ -173,6 +173,10 @@ Si une archive reste refusée : `npm run probe -- "C:/Gravity/RagnarokZero/data.
 **Accents et caractères cassés** — l'encodage est détecté automatiquement (CP949 des clients
 coréens, UTF-8 des repacks). En cas de doute : `npm run extract -- --encoding cp949`.
 
+**Un fichier attendu est introuvable** — `npm run find -- item` liste tout ce qui, dans le
+client, contient ce motif dans son chemin, trié par taille. C'est ce qui répond à « ce
+fichier existe-t-il, et sous quel nom ? » sans avoir à deviner.
+
 **« structure inattendue » ou « impossible de déduire les colonnes »** — le fichier n'a pas
 la forme attendue sur ce client. `npm run dump -- "<chemin du fichier>"` décrit ce qu'il
 contient réellement : tables construites, largeur des lignes, exemples. C'est ce qu'il faut
@@ -207,6 +211,7 @@ tools/          chaîne d'extraction (Node, sans build)
   client-path.mjs  chemin du client, mémorisé et partagé entre les outils
   probe-grf.mjs diagnostic d'archive GRF
   dump-lua.mjs  décrit la structure d'un .lub, pour caler un parseur
+  find.mjs      cherche un fichier dans le client, par motif sur le chemin
   sniff.mjs     capture passive du trafic du jeu (pilote dumpcap/tshark)
   pcap.mjs      lecture pcap/pcapng + réassemblage TCP
   analyze-capture.mjs  déduit les tables de drop dans une capture

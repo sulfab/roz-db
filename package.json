@@ -12,6 +12,7 @@
     "scan": "node tools/scan.mjs",
     "probe": "node tools/probe-grf.mjs",
     "dump": "node tools/dump-lua.mjs",
+    "find": "node tools/find.mjs",
     "sniff": "node tools/sniff.mjs",
     "analyze": "node tools/analyze-capture.mjs",
     "extract": "node tools/extract.mjs",
