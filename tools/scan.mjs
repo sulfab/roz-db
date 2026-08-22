@@ -70,9 +70,15 @@ function main() {
   console.log(`Client : ${clientDir}\n`)
   console.log('Archives')
   for (const { name, grf } of vfs.grfs) {
-    const line = { name, version: `0x${grf.version.toString(16)}`, files: grf.entries.size }
+    const line = {
+      name,
+      version: `0x${grf.version.toString(16)}`,
+      files: grf.entries.size,
+      signature: grf.signature,
+    }
     report.archives.push(line)
-    console.log(`  ${name.padEnd(24)} ${line.files} fichiers  (v${line.version})`)
+    const note = grf.customSignature ? `  (signature "${grf.signature}" — non standard, mais lisible)` : ''
+    console.log(`  ${name.padEnd(24)} ${line.files} fichiers  (v${line.version})${note}`)
   }
   if (vfs.looseDir) console.log(`  data/ en clair           ${vfs.looseDir}`)
   for (const err of vfs.errors) console.log(`  ! ${err}`)
@@ -99,11 +105,40 @@ function main() {
     if (!full && hits.length > group.files.length) console.log(`      ... et ${hits.length - group.files.length} autres (--full pour tout voir)`)
   }
 
+  // Quand rien n'est trouve, savoir ce que le dossier data/ contient vraiment
+  // vaut mieux qu'une liste de "introuvable".
+  if (vfs.looseDir && report.known.every((k) => !k.path)) {
+    console.log('\nContenu du dossier data/ en clair')
+    const listing = inventory(vfs.looseDir)
+    report.looseData = listing
+    for (const line of listing.slice(0, 30)) console.log(`  ${line.count.toString().padStart(6)}  ${line.ext}`)
+    if (!listing.length) console.log('  (vide)')
+  }
+
   fs.writeFileSync(path.join(ROOT, 'scan-report.json'), JSON.stringify(report, null, 2))
   vfs.close()
 
   console.log('\nRapport ecrit dans scan-report.json.')
   console.log('Les lignes [!] sont du Lua compile : leur contenu n\'est pas lisible tel quel.')
+}
+
+/** Repartition par extension du dossier data/ en clair. */
+function inventory(dir) {
+  const counts = new Map()
+  const walk = (current, depth) => {
+    if (depth > 6) return
+    let items
+    try { items = fs.readdirSync(current, { withFileTypes: true }) } catch { return }
+    for (const item of items) {
+      if (item.isDirectory()) walk(path.join(current, item.name), depth + 1)
+      else {
+        const ext = path.extname(item.name).toLowerCase() || '(sans extension)'
+        counts.set(ext, (counts.get(ext) || 0) + 1)
+      }
+    }
+  }
+  walk(dir, 0)
+  return [...counts].map(([ext, count]) => ({ ext, count })).sort((a, b) => b.count - a.count)
 }
 
 function safeRead(vfs, p) {

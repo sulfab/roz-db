@@ -102,6 +102,12 @@ compilé. L'extraction retombe alors sur les tables texte de `data/` (noms, slot
 descriptions), ce qui couvre l'essentiel. Pour le reste, décompile le fichier (`unluac`,
 `luadec`) et dépose le résultat en clair dans `data/` : il sera repris automatiquement.
 
+**`signature GRF absente`** — certains clients (dont Ragnarok Zero) remplacent la chaîne
+magique `Master of Magic` par autre chose, `Event Horizon` par exemple. Le lecteur ne s'y
+fie plus : il valide sur la structure. Si l'archive reste refusée,
+`npm run probe -- "C:/Gravity/RagnarokZero/data.grf"` dit précisément où ça coince —
+en-tête différent, ou contenu réellement chiffré.
+
 **`fichier chiffré en DES`** — rare, et non géré. Extrais-le avec GRF Editor vers un dossier
 `data/` à côté du client ; l'extraction le lira de là.
 
@@ -114,7 +120,7 @@ coréens, UTF-8 des repacks). En cas de doute : `npm run extract -- --encoding c
 ## Développement
 
 ```bash
-npm test          # 27 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
+npm test          # 30 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
 npm run build     # typecheck + build statique
 ```
 
@@ -131,6 +137,7 @@ tools/          chaîne d'extraction (Node, sans build)
   parsers/      items, mobs, navigation, tables texte
   extract.mjs   orchestration → public/data/*.json
   scan.mjs      inventaire du client
+  probe-grf.mjs diagnostic d'archive GRF
   icons.mjs     BMP → PNG
   import-drops.mjs
 src/            application React (Vite, TypeScript)

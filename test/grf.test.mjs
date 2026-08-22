@@ -77,3 +77,46 @@ test('une archive illisible ne fait pas tomber le reste', () => {
   assert.match(vfs.errors[0], /casse\.grf/)
   vfs.close()
 })
+
+test('signature non standard : l archive reste lisible', () => {
+  const dir = tmpdir()
+  const grfPath = path.join(dir, 'data.grf')
+  writeGrf(grfPath, { 'data/mapnametable.txt': 'prontera.rsw#Prontera#\n' })
+
+  // Ragnarok Zero annonce "Event Horizon" au lieu de "Master of Magic".
+  // Le format ne change pas pour autant : on valide sur la structure.
+  const fd = fs.openSync(grfPath, 'r+')
+  fs.writeSync(fd, Buffer.from('Event Horizon\0\0', 'latin1'), 0, 15, 0)
+  fs.closeSync(fd)
+
+  const grf = openGrf(grfPath)
+  assert.equal(grf.signature, 'Event Horizon')
+  assert.equal(grf.customSignature, true)
+  assert.equal(grf.read('data/mapnametable.txt').toString(), 'prontera.rsw#Prontera#\n')
+  grf.close()
+})
+
+test('archive chiffree : message clair, pas de plantage obscur', () => {
+  const dir = tmpdir()
+  const grfPath = path.join(dir, 'data.grf')
+  writeGrf(grfPath, { 'data/mapnametable.txt': 'prontera.rsw#Prontera#\n' })
+
+  // On brouille le flux de la table : en-tete intact, contenu illisible.
+  const raw = fs.readFileSync(grfPath)
+  const tableOffset = 0x2e + raw.readUInt32LE(0x1e) + 8
+  raw.fill(0xab, tableOffset, tableOffset + 16)
+  fs.writeFileSync(grfPath, raw)
+
+  assert.throws(() => openGrf(grfPath), /chiffree|illisible/)
+})
+
+test('offset de table aberrant : refus explicite', () => {
+  const dir = tmpdir()
+  const grfPath = path.join(dir, 'data.grf')
+  writeGrf(grfPath, { 'data/ok.txt': 'ok' })
+  const raw = fs.readFileSync(grfPath)
+  raw.writeUInt32LE(0x7fffffff, 0x1e)
+  fs.writeFileSync(grfPath, raw)
+
+  assert.throws(() => openGrf(grfPath), /hors limites/)
+})

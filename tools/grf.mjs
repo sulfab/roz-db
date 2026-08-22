@@ -21,6 +21,16 @@ import { decode, pathKey } from './encoding.mjs'
 const HEADER_SIZE = 0x2e
 const SIGNATURE = 'Master of Magic'
 
+/**
+ * Certains clients recents (dont Ragnarok Zero) remplacent la chaine magique
+ * par autre chose — "Event Horizon" par exemple — sans changer le format pour
+ * autant. On ne valide donc pas sur la signature, mais sur ce qui compte
+ * vraiment : une version connue et une table des fichiers qui se decompresse.
+ */
+export function isKnownSignature(sig) {
+  return sig.startsWith(SIGNATURE)
+}
+
 export const FLAG_FILE = 0x01
 export const FLAG_DES_FULL = 0x02   // fichier entierement chiffre (DES RO)
 export const FLAG_DES_HEADER = 0x04 // seuls les premiers blocs sont chiffres
@@ -43,14 +53,14 @@ export class Grf {
 
   #readTable() {
     const header = this.#read(0, HEADER_SIZE)
-    const sig = header.subarray(0, SIGNATURE.length).toString('latin1')
-    if (sig !== SIGNATURE) throw new Error(`${this.path}: signature GRF absente (lu "${sig}")`)
+    this.signature = header.subarray(0, SIGNATURE.length).toString('latin1').replace(/\0.*$/, '')
+    this.customSignature = !isKnownSignature(this.signature)
 
     this.version = header.readUInt32LE(0x2a)
     if (this.version !== 0x200) {
       throw new Error(
-        `${this.path}: version GRF 0x${this.version.toString(16)} non geree (seul 0x200 l'est). ` +
-        `Repacke l'archive avec GRF Editor si besoin.`
+        `${this.path}: version GRF 0x${this.version.toString(16)} non geree (seul 0x200 l'est), ` +
+        `signature "${this.signature}". Lance \`npm run probe -- "${this.path}"\` pour un diagnostic.`
       )
     }
 
@@ -61,8 +71,25 @@ export class Grf {
     const sizes = this.#read(HEADER_SIZE + tableOffset, 8)
     const packedLen = sizes.readUInt32LE(0)
     const realLen = sizes.readUInt32LE(4)
+    const stat = fs.fstatSync(this.fd)
+    if (packedLen <= 0 || HEADER_SIZE + tableOffset + 8 + packedLen > stat.size) {
+      throw new Error(
+        `${this.path}: table des fichiers hors limites (offset ${tableOffset}, ${packedLen} octets ` +
+        `pour un fichier de ${stat.size}), signature "${this.signature}". ` +
+        `L'archive est probablement chiffree. Lance \`npm run probe -- "${this.path}"\`.`
+      )
+    }
+
     const packed = this.#read(HEADER_SIZE + tableOffset + 8, packedLen)
-    const table = zlib.inflateSync(packed)
+    let table
+    try {
+      table = zlib.inflateSync(packed)
+    } catch (err) {
+      throw new Error(
+        `${this.path}: table des fichiers illisible (${err.message}), signature "${this.signature}". ` +
+        `L'archive est probablement chiffree. Lance \`npm run probe -- "${this.path}"\`.`
+      )
+    }
     if (table.length !== realLen) {
       throw new Error(`${this.path}: table des fichiers corrompue (${table.length} != ${realLen})`)
     }

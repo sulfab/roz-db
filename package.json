@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test": "node --test \"test/*.test.mjs\"",
     "scan": "node tools/scan.mjs",
+    "probe": "node tools/probe-grf.mjs",
     "extract": "node tools/extract.mjs",
     "icons": "node tools/icons.mjs",
     "import-drops": "node tools/import-drops.mjs"
