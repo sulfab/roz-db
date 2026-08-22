@@ -131,7 +131,9 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
         tried.push({ path: name, score: 0, error: err.message })
         continue
       }
-      if (buffer) attempts.push({ path: name, buffer, size: entry.size })
+      // Les chemins connus arrivent sans taille : on prend celle du contenu,
+      // sinon un candidat ecarte serait rapporte sans son poids.
+      if (buffer) attempts.push({ path: name, buffer, size: entry.size ?? buffer.length })
     }
   }
 
@@ -140,7 +142,7 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
   addAll(discoverBigLuaFiles(vfs))
 
   // Le plus gros d'abord : une base d'items complete se reconnait a sa taille.
-  attempts.sort((a, b) => (b.size ?? b.buffer.length) - (a.size ?? a.buffer.length))
+  attempts.sort((a, b) => b.size - a.size)
 
   if (!attempts.length && !tried.length) {
     warnings.push(`Aucun fichier d'items trouve (cherche : ${ITEM_INFO_CANDIDATES.join(', ')})`)
@@ -159,16 +161,33 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
         })
         const table = findItemTable(env) || bestItemTable(tables)
         const score = table ? scoreItemTable(table) : 0
-        tried.push({ path: attempt.path, score, env, tables })
+        tried.push({ path: attempt.path, score, env, tables, luaWarnings, size: attempt.size })
         if (table && (!winner || score > winner.score)) {
           winner = { path: attempt.path, table, score, luaWarnings }
         }
       } catch (err) {
-        tried.push({ path: attempt.path, score: 0, error: err.message })
+        tried.push({ path: attempt.path, score: 0, error: err.message, size: attempt.size })
       }
       // Une base d'items complete se reconnait tout de suite : inutile de
       // continuer a executer des fichiers une fois qu'on la tient.
       if (winner && winner.score >= 100) break
+    }
+
+    // Les candidats sont traites du plus gros au plus petit : ceux qui
+    // precedent le gagnant sont plus gros que lui et n'ont rien donne. C'est
+    // l'information la plus utile du lot, l'un d'eux est peut-etre la vraie
+    // base. La taire laissait croire que le gagnant etait le bon fichier.
+    const winnerIndex = winner ? tried.findIndex((t) => t.path === winner.path) : tried.length
+    const skipped = tried.slice(0, Math.max(0, winnerIndex)).filter((t) => t.score === 0)
+    if (skipped.length) {
+      warnings.push(
+        `${skipped.length} fichier(s) plus gros ecarte(s) : ` +
+        skipped.slice(0, 4).map((t) => {
+          const size = t.size ? ` (${Math.round(t.size / 1024)} ko)` : ''
+          const why = t.error || (t.luaWarnings || []).join(' ; ') || 'aucune table d\'items reconnue'
+          return `${t.path}${size} : ${why}`
+        }).join(' ; ')
+      )
     }
 
     if (!winner) {
@@ -307,41 +326,6 @@ const ITEM_ID_MAX = 100_000
 const MIN_INFERRED_ENTRIES = 50
 
 /**
- * Reconnait une table d'items sans exiger des noms de champs precis.
- *
- * Deux formes existent : la table detaillee des clients classiques (id -> objet
- * decrivant l'item) et la simple table de noms (id -> chaine), qui est parfois
- * tout ce qu'un client embarque. Exiger `identifiedDisplayName` faisait passer
- * la seconde pour rien du tout.
- */
-export function analyzeItemTable(value) {
-  if (!value || typeof value !== 'object') return null
-  const entries = numericEntries(value).filter(([id]) => id >= ITEM_ID_MIN && id <= ITEM_ID_MAX)
-  if (entries.length < 2) return null
-
-  const objects = entries.filter(([, v]) => v && typeof v === 'object')
-  const strings = entries.filter(([, v]) => typeof v === 'string' && v.length > 0)
-
-  if (objects.length >= entries.length * 0.8) {
-    const named = objects.filter(([, v]) =>
-      v.identifiedDisplayName !== undefined || v.unidentifiedDisplayName !== undefined
-    ).length
-    // Des champs reconnus sont une preuve forte : deux entrees ne sont pas une
-    // coincidence. La forme seule est une preuve faible : il en faut beaucoup.
-    if (named >= 2) return { shape: 'objet', entries: objects, named, score: named * 10 }
-    if (objects.length >= MIN_INFERRED_ENTRIES) {
-      return { shape: 'objet', entries: objects, named: 0, score: objects.length }
-    }
-    return null
-  }
-
-  if (strings.length >= entries.length * 0.8 && strings.length >= MIN_INFERRED_ENTRIES) {
-    return { shape: 'noms', entries: strings, named: 0, score: strings.length }
-  }
-  return null
-}
-
-/**
  * Quand les champs ne portent pas les noms attendus, on les reconnait a leurs
  * valeurs : un nom est une chaine presente partout et presque toujours
  * differente ; un nombre de slots est un petit entier ; une description est une
@@ -373,11 +357,60 @@ function inferFields(entries) {
     .filter((c) => c.value > 0)
     .sort((a, b) => b.value - a.value)[0]?.key
 
+  // Un libelle est present sur presque toutes les entrees et presque toujours
+  // different. Un champ present partout mais qui ne prend que quelques valeurs
+  // est une categorie, pas un nom.
+  const NAME_VARIETY = 0.5
   return {
-    name: pickBy((s) => (s.strings > sample.length * 0.5 ? s.distinct.size : 0)),
+    name: pickBy((s) => (
+      s.strings > sample.length * 0.5 && s.distinct.size >= s.strings * NAME_VARIETY
+        ? s.distinct.size
+        : 0
+    )),
     slots: pickBy((s) => (s.numbers > sample.length * 0.5 && s.small === s.numbers ? s.numbers : 0)),
     desc: pickBy((s) => s.lists),
   }
+}
+
+/**
+ * Reconnait une table d'items sans exiger des noms de champs precis.
+ *
+ * Deux formes existent : la table detaillee des clients classiques (id -> objet
+ * decrivant l'item) et la simple table de noms (id -> chaine), qui est parfois
+ * tout ce qu'un client embarque. Exiger `identifiedDisplayName` faisait passer
+ * la seconde pour rien du tout.
+ */
+export function analyzeItemTable(value) {
+  if (!value || typeof value !== 'object') return null
+  const entries = numericEntries(value).filter(([id]) => id >= ITEM_ID_MIN && id <= ITEM_ID_MAX)
+  if (entries.length < 2) return null
+
+  const objects = entries.filter(([, v]) => v && typeof v === 'object')
+  const strings = entries.filter(([, v]) => typeof v === 'string' && v.length > 0)
+
+  if (objects.length >= entries.length * 0.8) {
+    const named = objects.filter(([, v]) =>
+      v.identifiedDisplayName !== undefined || v.unidentifiedDisplayName !== undefined
+    ).length
+    // Des champs reconnus sont une preuve forte : deux entrees ne sont pas une
+    // coincidence. La forme seule est une preuve faible : il en faut beaucoup.
+    if (named >= 2) return { shape: 'objet', entries: objects, named, score: named * 10 }
+
+    if (objects.length >= MIN_INFERRED_ENTRIES) {
+      // Une table d'items sans champ reconnu doit au moins porter un libelle.
+      // Sans ce garde-fou, n'importe quelle table indexee par identifiant
+      // d'item passait pour une base de noms — les proprietes d'equipement,
+      // par exemple, dont le champ le plus varie n'est qu'une categorie.
+      const fields = inferFields(objects)
+      if (fields.name) return { shape: 'objet', entries: objects, named: 0, fields, score: objects.length }
+    }
+    return null
+  }
+
+  if (strings.length >= entries.length * 0.8 && strings.length >= MIN_INFERRED_ENTRIES) {
+    return { shape: 'noms', entries: strings, named: 0, score: strings.length }
+  }
+  return null
 }
 
 /** Une table est une table d'items si ses valeurs portent les bons champs. */

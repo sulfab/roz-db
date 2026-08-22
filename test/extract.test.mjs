@@ -268,3 +268,34 @@ test('base aux champs inconnus : les items sortent quand meme nommes', () => {
   // La deduction est annoncee : c'est elle qu'on ira verifier si un nom surprend.
   assert.ok(meta.warnings.some((w) => /champs deduits/.test(w)), meta.warnings.join(' | '))
 })
+
+test('un candidat plus gros ecarte est signale, pas passe sous silence', () => {
+  const client = makeFakeClient(tmpdir())
+  const entries = readGrfEntries(path.join(client, 'data.grf'))
+  delete entries['System\\itemInfo.lub']
+  for (const key of Object.keys(entries)) {
+    if (/idnum2item|itemslotcount/i.test(key)) delete entries[key]
+  }
+  writeGrf(path.join(client, 'data.grf'), entries)
+
+  const dir = path.join(client, 'data', 'luafiles514', 'lua files', 'datainfo')
+  fs.mkdirSync(dir, { recursive: true })
+  // Le plus gros candidat est illisible ; un plus petit fournit les items.
+  fs.writeFileSync(path.join(dir, 'iteminfo.lub'), Buffer.concat([
+    Buffer.from([0x1b, 0x4c, 0x75, 0x61, 0x51]),
+    Buffer.alloc(300_000),
+  ]))
+  fs.copyFileSync(
+    path.join(ROOT, 'test', 'fixtures', 'renamed.lub'),
+    path.join(dir, 'itemtable.lub')
+  )
+
+  const out = path.join(tmpdir(), 'data')
+  const { items, meta } = runExtract(client, out)
+
+  assert.equal(items['501'].name, 'Objet 1') // le plus petit a pris le relais
+  const notice = meta.warnings.find((w) => /plus gros ecarte/.test(w))
+  assert.ok(notice, meta.warnings.join(' | '))
+  assert.match(notice, /iteminfo\.lub/)
+  assert.match(notice, /293 ko/)
+})
