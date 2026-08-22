@@ -1,0 +1,132 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { tmpdir, makeFakeClient } from './helpers.mjs'
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+function runExtract(clientDir, outDir) {
+  const stdout = execFileSync(
+    process.execPath,
+    [path.join(ROOT, 'tools', 'extract.mjs'), '--client', clientDir, '--out', outDir],
+    { encoding: 'utf8' }
+  )
+  const read = (name) => JSON.parse(fs.readFileSync(path.join(outDir, name), 'utf8'))
+  return { stdout, items: read('items.json'), mobs: read('mobs.json'), maps: read('maps.json'), meta: read('meta.json') }
+}
+
+test('extraction complete sur un client synthetique', () => {
+  const client = makeFakeClient(tmpdir())
+  const out = path.join(tmpdir(), 'data')
+  const { items, mobs, maps, meta } = runExtract(client, out)
+
+  // --- items : itemInfo.lub prioritaire, tables texte en complement --------
+  assert.equal(items['501'].name, 'Red Potion')
+  assert.equal(items['501'].res, 'red_potion')
+  assert.equal(items['501'].slots, 0)
+  assert.deepEqual(items['501'].desc, [
+    'Une potion rouge qui rend',
+    '^0000FF45^000000 points de vie.',
+  ])
+  assert.equal(items['1202'].slots, 3)
+  assert.equal(items['4001'].name, 'Poring Card')
+
+  // 2104 n'existe que dans les tables texte : il doit quand meme sortir.
+  assert.equal(items['2104'].name, 'Guard')
+  assert.equal(items['2104'].slots, 1)
+  assert.deepEqual(items['2104'].desc, ['Un bouclier de base.', 'Defense +3.'])
+
+  // --- mobs : nom localise du navi, sprite du jobname ----------------------
+  assert.equal(mobs['1002'].name, 'Poring')
+  assert.equal(mobs['1002'].sprite, 'PORING')
+  assert.equal(mobs['1002'].level, 1)
+  assert.equal(mobs['1039'].name, 'Baphomet')
+  assert.equal(mobs['1039'].level, 81)
+
+  // --- spawns : agreges par carte, tries par population --------------------
+  const poringMaps = mobs['1002'].spawns.map((s) => s.map)
+  assert.ok(poringMaps.includes('prt_fild08'))
+  assert.ok(poringMaps.includes('pay_fild04'))
+  assert.equal(mobs['1002'].spawns[0].map, 'prt_fild08') // 60, le plus peuple
+  assert.equal(mobs['1002'].spawns[0].amount, 60)
+
+  // --- cartes : nom lisible + mobs presents --------------------------------
+  assert.equal(maps['prt_fild08'].name, 'Prontera Field 8')
+  assert.deepEqual(
+    maps['prt_fild08'].mobs.map((m) => m.id).sort((a, b) => a - b),
+    [1002, 1063]
+  )
+  assert.equal(maps['prontera'].name, 'Prontera') // carte sans mob : conservee
+  assert.deepEqual(maps['prontera'].mobs, [])
+
+  // --- colonnes du navi deduites, pas supposees ----------------------------
+  assert.deepEqual(meta.naviColumns, { map: 0, id: 1, name: 2, level: 3, amount: 4 })
+  assert.ok(meta.naviConfidence.map > 0.9)
+  assert.ok(meta.naviConfidence.id > 0.9)
+
+  assert.equal(meta.counts.items, 5)
+  assert.equal(meta.counts.mobs, 4)
+  assert.ok(meta.counts.spawns >= 20)
+  assert.deepEqual(meta.archives, ['data.grf'])
+})
+
+test('itemInfo compile : on retombe sur les tables texte, avec un avertissement', () => {
+  const client = makeFakeClient(tmpdir())
+  // System/ vit a la racine du client, pas sous data/ : c'est ce fichier-la
+  // que le client lit en priorite, et il est compile dans les clients officiels.
+  fs.mkdirSync(path.join(client, 'System'), { recursive: true })
+  const bytecode = Buffer.concat([Buffer.from([0x1b, 0x4c, 0x75, 0x61, 0x51]), Buffer.alloc(64)])
+  fs.writeFileSync(path.join(client, 'System', 'itemInfo.lub'), bytecode)
+
+  const out = path.join(tmpdir(), 'data')
+  const { items, meta } = runExtract(client, out)
+
+  // itemInfo.lub compile est ignore, mais idnum2itemdisplaynametable.txt reste.
+  assert.equal(items['501'].name, 'Red Potion')
+  assert.equal(items['909'].name, 'Jellopy')
+  assert.ok(meta.warnings.some((w) => /bytecode Lua compile/.test(w)))
+})
+
+test('client sans fichier de navigation : extraction partielle, pas d echec', () => {
+  const dir = tmpdir()
+  fs.mkdirSync(path.join(dir, 'data'), { recursive: true })
+  fs.writeFileSync(path.join(dir, 'data', 'idnum2itemdisplaynametable.txt'), '501#Red Potion#\n')
+  fs.writeFileSync(path.join(dir, 'data', 'mapnametable.txt'), 'prontera.rsw#Prontera#\n')
+
+  const out = path.join(tmpdir(), 'data')
+  const { items, mobs, meta } = runExtract(dir, out)
+
+  assert.equal(items['501'].name, 'Red Potion')
+  assert.deepEqual(mobs, {})
+  assert.ok(meta.warnings.some((w) => /navi_mob/.test(w)))
+})
+
+test('drops.json est cree vide et jamais ecrase par une extraction', () => {
+  const client = makeFakeClient(tmpdir())
+  const out = path.join(tmpdir(), 'data')
+  runExtract(client, out)
+
+  const dropsFile = path.join(out, 'drops.json')
+  assert.deepEqual(JSON.parse(fs.readFileSync(dropsFile, 'utf8')).mobs, {})
+
+  const csv = path.join(out, 'drops.csv')
+  fs.writeFileSync(csv, 'mobId,itemId,chance\n1002,909,7000\n1002,4001,10\n1063,909,5000\n')
+  execFileSync(process.execPath, [
+    path.join(ROOT, 'tools', 'import-drops.mjs'), csv,
+    '--out', dropsFile, '--base', '10000', '--source', 'test',
+  ], { encoding: 'utf8' })
+
+  const drops = JSON.parse(fs.readFileSync(dropsFile, 'utf8'))
+  assert.equal(drops.meta.source, 'test')
+  assert.deepEqual(drops.mobs['1002'], [
+    { item: 909, chance: 70 },
+    { item: 4001, chance: 0.1 },
+  ])
+
+  // Une nouvelle extraction ne doit pas effacer les drops importes.
+  runExtract(client, out)
+  assert.deepEqual(JSON.parse(fs.readFileSync(dropsFile, 'utf8')).mobs['1002'].length, 2)
+})

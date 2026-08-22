@@ -1,0 +1,6 @@
+node_modules/
+dist/
+public/data/*.json
+public/icons/
+scan-report.json
+.client-path

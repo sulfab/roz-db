@@ -1,0 +1,30 @@
+{
+  "name": "roz-db",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Base de donnees locale Ragnarok Zero Global : items, mobs, cartes, drops",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "node --test \"test/*.test.mjs\"",
+    "scan": "node tools/scan.mjs",
+    "extract": "node tools/extract.mjs",
+    "icons": "node tools/icons.mjs",
+    "import-drops": "node tools/import-drops.mjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "iconv-lite": "^0.6.3",
+    "pngjs": "^7.0.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}
