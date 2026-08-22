@@ -23,6 +23,16 @@ export interface Db {
   itemList: Item[]
   mobList: Mob[]
   mapList: GameMap[]
+  /** Noms normalises une fois pour toutes : la recherche ne fait plus que comparer. */
+  index: SearchEntry[]
+}
+
+interface SearchEntry {
+  kind: 'item' | 'mob' | 'map'
+  ref: Item | Mob | GameMap
+  /** Formes cherchables : nom, nom local, sprite, identifiant technique. */
+  keys: string[]
+  id: number | null
 }
 
 async function loadJson<T>(name: string, fallback: T): Promise<T> {
@@ -92,12 +102,28 @@ export async function loadDb(): Promise<Db> {
   const mobList = [...mobs.values()].sort((a, b) => a.name.localeCompare(b.name))
   const mapList = [...maps.values()].sort((a, b) => a.name.localeCompare(b.name))
 
+  // Normaliser dix mille noms a chaque frappe coute cher pour rien : on le
+  // fait une fois au chargement, la recherche n'a plus qu'a comparer.
+  const index: SearchEntry[] = []
+  for (const item of itemList) {
+    index.push({ kind: 'item', ref: item, id: item.id, keys: [normalize(item.name)] })
+  }
+  for (const mob of mobList) {
+    const keys = [normalize(mob.name)]
+    if (mob.nameLocal) keys.push(mob.nameLocal.toLowerCase())
+    if (mob.sprite) keys.push(normalize(mob.sprite))
+    index.push({ kind: 'mob', ref: mob, id: mob.id, keys })
+  }
+  for (const map of mapList) {
+    index.push({ kind: 'map', ref: map, id: null, keys: [normalize(map.name), map.id] })
+  }
+
   return {
     items, mobs, maps, drops, meta,
     dropsByMob, dropsByItem,
     hasDrops: dropsByMob.size > 0,
     hasPopulations: meta?.hasPopulations !== false,
-    itemList, mobList, mapList,
+    itemList, mobList, mapList, index,
   }
 }
 
@@ -122,32 +148,25 @@ function score(haystack: string, needle: string): number {
 
 export function search(db: Db, query: string, limit = 50): Hit[] {
   const needle = normalize(query.trim())
-  if (needle.length < 1) return []
-  const hits: Hit[] = []
+  if (!needle) return []
 
   const numeric = /^\d+$/.test(needle) ? Number(needle) : null
-  if (numeric !== null) {
-    const item = db.items.get(numeric)
-    if (item) hits.push({ kind: 'item', item, score: 200 })
-    const mob = db.mobs.get(numeric)
-    if (mob) hits.push({ kind: 'mob', mob, score: 200 })
-  }
+  const hits: Hit[] = []
 
-  for (const item of db.itemList) {
-    const s = score(normalize(item.name), needle)
-    if (s) hits.push({ kind: 'item', item, score: s })
-  }
-  for (const mob of db.mobList) {
-    const s = Math.max(
-      score(normalize(mob.name), needle),
-      mob.nameLocal ? score(mob.nameLocal.toLowerCase(), needle) : 0,
-      mob.sprite ? score(normalize(mob.sprite), needle) * 0.5 : 0
-    )
-    if (s) hits.push({ kind: 'mob', mob, score: s })
-  }
-  for (const map of db.mapList) {
-    const s = Math.max(score(normalize(map.name), needle), score(map.id, needle) * 0.9)
-    if (s) hits.push({ kind: 'map', map, score: s })
+  for (const entry of db.index) {
+    // Un identifiant tape en toutes lettres passe devant tout le reste.
+    let best = numeric !== null && entry.id === numeric ? 200 : 0
+    for (let i = 0; i < entry.keys.length; i++) {
+      // Les formes secondaires (sprite, identifiant de carte) comptent moins
+      // que le nom affiche.
+      const value = score(entry.keys[i], needle) * (i === 0 ? 1 : 0.9)
+      if (value > best) best = value
+    }
+    if (!best) continue
+
+    if (entry.kind === 'item') hits.push({ kind: 'item', item: entry.ref as Item, score: best })
+    else if (entry.kind === 'mob') hits.push({ kind: 'mob', mob: entry.ref as Mob, score: best })
+    else hits.push({ kind: 'map', map: entry.ref as GameMap, score: best })
   }
 
   return hits.sort((a, b) => b.score - a.score).slice(0, limit)
