@@ -260,6 +260,10 @@ class Vm {
     this.maxSteps = maxSteps
     /** Fonctions attendues du client de jeu et absentes ici. */
     this.missing = new Set()
+    // Toutes les tables construites pendant l'execution. Les fichiers de
+    // donnees declarent parfois leur table en local : elle n'apparait alors
+    // dans aucune globale, alors qu'elle contient tout ce qu'on cherche.
+    this.tables = []
   }
 
   call(fn, args, name) {
@@ -322,7 +326,7 @@ class Vm {
           t.set(RK(b), RK(c))
           break
         }
-        case OP.NEWTABLE: R[a] = new LuaTable(); break
+        case OP.NEWTABLE: R[a] = new LuaTable(); this.tables.push(R[a]); break
         case OP.SELF: {
           const t = R[b]
           R[a + 1] = t
@@ -628,19 +632,20 @@ function makeEnv() {
  *
  * @param {Buffer} buf
  * @param {{env?: LuaTable, maxSteps?: number}} options
- * @returns {{env: LuaTable, error: string|null, missing: string[]}} `error` non
- *   nul signale une execution interrompue : les globales deja posees restent
- *   exploitables. `missing` liste les fonctions du client appelees en vain.
+ * @returns {{env: LuaTable, error: string|null, missing: string[], tables: LuaTable[]}}
+ *   `error` non nul signale une execution interrompue : les globales deja posees
+ *   restent exploitables. `missing` liste les fonctions du client appelees en
+ *   vain. `tables` contient toutes les tables construites, y compris locales.
  */
 export function runCompiled(buf, { env = makeEnv(), maxSteps } = {}) {
   const proto = undump(buf)
   const vm = new Vm(env, { maxSteps })
   try {
     vm.call(new Closure(proto, []), [])
-    return { env, error: null, missing: [...vm.missing] }
+    return { env, error: null, missing: [...vm.missing], tables: vm.tables }
   } catch (err) {
     if (err instanceof LuaError || err instanceof RangeError || err instanceof TypeError) {
-      return { env, error: err.message, missing: [...vm.missing] }
+      return { env, error: err.message, missing: [...vm.missing], tables: vm.tables }
     }
     throw err
   }
@@ -669,4 +674,14 @@ export function toPlain(value, decodeString = (s) => s, seen = new Map()) {
     return out
   }
   return null // fonctions : sans interet pour l'extraction
+}
+
+/**
+ * Convertit plusieurs tables en partageant la memoisation : les sous-tables
+ * communes ne sont converties qu'une fois, et les references restent partagees
+ * cote JS comme elles l'etaient cote Lua.
+ */
+export function toPlainAll(tables, decodeString = (s) => s) {
+  const seen = new Map()
+  return tables.map((t) => toPlain(t, decodeString, seen))
 }

@@ -171,7 +171,7 @@ function collectRows(env) {
     if (items.length > 20 && items.every((v) => v && typeof v === 'object')) {
       for (const item of items) {
         const tuple = toArray(item)
-        if (tuple.length >= 3 && tuple.every((v) => v === null || typeof v !== 'object')) rows.push(tuple)
+        if (tuple.length >= 2 && tuple.every((v) => v === null || typeof v !== 'object')) rows.push(tuple)
       }
       if (rows.length) return
     }
@@ -227,9 +227,10 @@ export function extractSpawns(vfs, {
     columns = inferred.columns
     confidence = inferred.confidence
     if (columns.map < 0 || columns.id < 0) {
+      const sample = rows.slice(0, 3).map((r) => JSON.stringify(r)).join(' ')
       warnings.push(
         `${file} : impossible de deduire les colonnes carte/mob ` +
-        `(${rows.length} lignes, ${inferred.width} colonnes). ` +
+        `(${rows.length} lignes, ${inferred.width} colonnes ; exemples : ${sample}). ` +
         `Envoie un extrait du fichier pour caler le parseur.`
       )
       continue

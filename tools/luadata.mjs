@@ -1,6 +1,6 @@
 import { decode } from './encoding.mjs'
 import { parseLua, isCompiledLua } from './lua.mjs'
-import { runCompiled, toPlain, LuaTable, makeEnv } from './luac.mjs'
+import { runCompiled, toPlain, toPlainAll, LuaTable, makeEnv } from './luac.mjs'
 
 /**
  * Point d'entree unique pour lire un fichier .lub, quel que soit son etat.
@@ -28,14 +28,16 @@ function toLuaTable(plain, seen = new Map()) {
 
 /**
  * @param {Buffer} buffer contenu brut du fichier
- * @param {{encoding?: string, env?: object}} options env : globales d'un fichier
- *   deja lu, a rendre visibles a celui-ci (npcidentity avant jobname).
- * @returns {{env: object, warnings: string[], compiled: boolean}}
+ * @param {{encoding?: string, env?: object, includeTables?: boolean}} options
+ *   env : globales d'un fichier deja lu, a rendre visibles a celui-ci
+ *   (npcidentity avant jobname). includeTables : rend aussi toutes les tables
+ *   construites, y compris celles declarees en local.
+ * @returns {{env: object, tables: object[], warnings: string[], compiled: boolean}}
  */
-export function loadLua(buffer, { encoding = 'auto', env = null } = {}) {
+export function loadLua(buffer, { encoding = 'auto', env = null, includeTables = false } = {}) {
   if (!isCompiledLua(buffer)) {
     const result = parseLua(decode(buffer, encoding), env ? { env } : {})
-    return { env: result.env, warnings: result.warnings, compiled: false }
+    return { env: result.env, tables: [], warnings: result.warnings, compiled: false }
   }
 
   const runtime = makeEnv()
@@ -47,7 +49,7 @@ export function loadLua(buffer, { encoding = 'auto', env = null } = {}) {
     }
   }
 
-  const { env: result, error, missing } = runCompiled(buffer, { env: runtime })
+  const { env: result, error, missing, tables } = runCompiled(buffer, { env: runtime })
 
   // La bibliotheque standard n'est pas une donnee du fichier : on la retire.
   for (const key of builtins) result.hash.delete(key)
@@ -57,6 +59,7 @@ export function loadLua(buffer, { encoding = 'auto', env = null } = {}) {
   if (error) warnings.push(`execution interrompue : ${error}`)
   return {
     env: toPlain(result, decodeString),
+    tables: includeTables ? toPlainAll(tables, decodeString) : [],
     warnings,
     // Purement informatif : ces fonctions sont fournies par le client de jeu,
     // leur absence n'empeche pas de recuperer les tables.

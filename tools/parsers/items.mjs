@@ -80,8 +80,11 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
     warnings.push(`Aucun itemInfo trouve (cherche : ${ITEM_INFO_CANDIDATES.join(', ')})`)
   } else {
     try {
-      const { env, warnings: luaWarnings } = loadLua(found.buffer, { encoding })
-      const table = findItemTable(env)
+      const { env, tables, warnings: luaWarnings } = loadLua(found.buffer, {
+        encoding,
+        includeTables: true,
+      })
+      const table = findItemTable(env) || bestItemTable(tables)
       if (!table) {
         warnings.push(`${found.path} : aucune table d'items reconnue`)
       } else {
@@ -159,19 +162,38 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
   return { items, sources, warnings }
 }
 
+/** Une table est une table d'items si ses valeurs portent les bons champs. */
+function scoreItemTable(value) {
+  if (!value || typeof value !== 'object') return 0
+  const entries = numericEntries(value)
+  if (entries.length < 4) return 0
+  return entries.filter(([, v]) =>
+    v && typeof v === 'object' &&
+    (v.unidentifiedDisplayName !== undefined || v.identifiedDisplayName !== undefined)
+  ).length
+}
+
+/**
+ * Repli quand la table n'est dans aucune globale : les fichiers officiels la
+ * declarent parfois en local, ou la construisent dans une fonction.
+ */
+function bestItemTable(tables) {
+  let best = null
+  let bestScore = 0
+  for (const table of tables) {
+    const score = scoreItemTable(table)
+    if (score > bestScore) { best = table; bestScore = score }
+  }
+  return bestScore >= 4 ? best : null
+}
+
 /** La table d'items s'appelle `tbl` dans kRO, mais pas dans tous les repacks. */
 function findItemTable(env) {
   if (env.tbl && typeof env.tbl === 'object') return env.tbl
   let best = null
   let bestScore = 0
   for (const value of Object.values(env)) {
-    if (!value || typeof value !== 'object') continue
-    const entries = numericEntries(value)
-    if (entries.length < 4) continue
-    const score = entries.filter(([, v]) =>
-      v && typeof v === 'object' &&
-      (v.unidentifiedDisplayName !== undefined || v.identifiedDisplayName !== undefined)
-    ).length
+    const score = scoreItemTable(value)
     if (score > bestScore) { best = value; bestScore = score }
   }
   return bestScore >= 4 ? best : null

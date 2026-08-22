@@ -87,3 +87,18 @@ test('refus explicite des bytecodes non Lua 5.1', () => {
 test('ce n est pas un chunk compile', () => {
   assert.throws(() => undump(Buffer.from('tbl = {}', 'utf8')), /pas un chunk Lua compile/)
 })
+
+test('table declaree en local : retrouvee parmi les tables construites', async () => {
+  const { loadLua } = await import('../tools/luadata.mjs')
+  const buf = fs.readFileSync(path.join(FIXTURES, 'iteminfo_local.lub'))
+  const { env, tables } = loadLua(buf, { includeTables: true })
+
+  // Rien dans les globales : c'est tout le probleme que ce repli resout.
+  assert.equal(env.tbl, undefined)
+
+  const itemTable = tables.find((t) => t && t['501'] && t['501'].identifiedDisplayName)
+  assert.ok(itemTable, 'table d items introuvable parmi les tables construites')
+  assert.equal(itemTable['501'].identifiedDisplayName, 'Red Potion')
+  assert.equal(itemTable['1202'].slotCount, 3)
+  assert.equal(itemTable['2104'].identifiedResourceName, 'guard')
+})

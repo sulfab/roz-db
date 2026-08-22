@@ -64,11 +64,32 @@ npm run import-drops -- drops.csv --source "encyclopédie in-game" --base 10000
 
 ### Relever l'encyclopédie en jeu
 
-C'est la source la plus fidèle à Zero Global, puisque c'est celle du serveur lui-même.
-Elle demande une capture côté client (paquets ou relevé écran), que cet outil ne fait pas
-encore : il n'y a pas de format public à parser à l'aveugle. La marche à suivre :
-produire un `drops.csv` au format ci-dessus, par quelque moyen que ce soit, puis
-`import-drops`. Envoie-moi un échantillon de capture et j'écris le parseur qui va avec.
+C'est la source la plus fidèle à Zero Global : c'est celle du serveur lui-même.
+
+```bash
+npm run sniff                      # capture pendant que tu joues, Ctrl+C pour arrêter
+npm run analyze -- captures/…      # cherche les tables de drop, écrit un CSV
+npm run import-drops -- captures/drops.csv --source "encyclopédie" --base 10000
+```
+
+La capture est **passive** : elle lit le trafic réseau, sans jamais toucher au processus du
+jeu, sans rien injecter ni modifier. Elle pilote `dumpcap`/`tshark` — installe Wireshark
+(avec Npcap) sous Windows — et détecte seule la connexion du jeu via le processus Ragnarok.
+Le fichier reste sur ta machine. Les CGU de Gravity interdisent largement les outils tiers ;
+une écoute passive de son propre trafic n'est pas de la triche, mais l'appréciation leur
+appartient.
+
+**L'analyse ne suppose aucun format de paquet.** Il n'est pas public, et le deviner
+produirait des chiffres faux sans qu'on s'en aperçoive. Une table de drop, quel que soit son
+enrobage, est une suite d'enregistrements de taille constante contenant chacun un
+identifiant d'item valide — et le client vient de nous donner la liste exacte des items et
+des mobs qui existent. `analyze-capture.mjs` cherche cette régularité, déduit le pas des
+enregistrements, la largeur des champs, la position du taux et l'identifiant du mob qui
+précède, puis propose l'échelle des taux. Il affiche ce qu'il a déduit : **vérifie deux ou
+trois lignes en jeu avant d'importer.**
+
+Si rien n'est trouvé, l'analyseur le dit et distingue les cas : trafic TLS (illisible),
+ou contenu compressé par le jeu. `--raw flux.bin` écrit le flux brut pour inspection.
 
 ## Comment ça marche
 
@@ -128,13 +149,15 @@ Si une archive reste refusée : `npm run probe -- "C:/Gravity/RagnarokZero/data.
 **Accents et caractères cassés** — l'encodage est détecté automatiquement (CP949 des clients
 coréens, UTF-8 des repacks). En cas de doute : `npm run extract -- --encoding cp949`.
 
-**Aucun mob, aucune zone** — le client n'a pas de `navi_mob_*.lub`, ou ils sont compilés.
-`npm run scan` le dit ; l'app reste utilisable pour les items.
+**« structure inattendue » ou « impossible de déduire les colonnes »** — le fichier n'a pas
+la forme attendue sur ce client. `npm run dump -- "<chemin du fichier>"` décrit ce qu'il
+contient réellement : tables construites, largeur des lignes, exemples. C'est ce qu'il faut
+pour caler le parseur sans deviner.
 
 ## Développement
 
 ```bash
-npm test          # 44 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
+npm test          # 53 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
 npm run build     # typecheck + build statique
 ```
 
@@ -142,7 +165,8 @@ Les tests fabriquent un vrai client synthétique (archive GRF valide en 0x200 et
 tables texte) et font tourner toute la chaîne dessus : rien n'exige d'avoir le client sous
 la main. Les fixtures de bytecode (`test/fixtures/*.lub`) sont produites par le vrai
 `luac 5.1`, leurs sources `.lua` sont à côté — tester la VM contre un bytecode que j'aurais
-assemblé moi-même n'aurait rien prouvé.
+assemblé moi-même n'aurait rien prouvé. Même principe pour `test/fixtures/capture.pcap`,
+écrit par un vrai `tcpdump` (`test/make-capture-fixture.mjs` le régénère).
 
 ### Structure
 
@@ -158,6 +182,10 @@ tools/          chaîne d'extraction (Node, sans build)
   scan.mjs      inventaire du client
   client-path.mjs  chemin du client, mémorisé et partagé entre les outils
   probe-grf.mjs diagnostic d'archive GRF
+  dump-lua.mjs  décrit la structure d'un .lub, pour caler un parseur
+  sniff.mjs     capture passive du trafic du jeu (pilote dumpcap/tshark)
+  pcap.mjs      lecture pcap/pcapng + réassemblage TCP
+  analyze-capture.mjs  déduit les tables de drop dans une capture
   icons.mjs     BMP → PNG
   import-drops.mjs
 src/            application React (Vite, TypeScript)

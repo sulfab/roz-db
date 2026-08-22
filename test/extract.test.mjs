@@ -102,6 +102,23 @@ test('itemInfo compile : le bytecode est execute, pas contourne', () => {
   assert.ok(meta.sources.some((src) => /itemInfo\.lub/.test(src)))
 })
 
+test('itemInfo dont la table est locale : les items sortent quand meme', () => {
+  const client = makeFakeClient(tmpdir())
+  fs.mkdirSync(path.join(client, 'System'), { recursive: true })
+  fs.copyFileSync(
+    path.join(ROOT, 'test', 'fixtures', 'iteminfo_local.lub'),
+    path.join(client, 'System', 'itemInfo.lub')
+  )
+  // Aucune table texte : le .lub est la seule source, comme sur un vrai client.
+  const out = path.join(tmpdir(), 'data')
+  const { items, meta } = runExtract(client, out)
+
+  assert.equal(items['501'].name, 'Red Potion')
+  assert.equal(items['2104'].name, 'Guard')
+  assert.equal(items['1202'].slots, 3)
+  assert.ok(!meta.warnings.some((w) => /aucune table d'items/.test(w)), meta.warnings.join(' | '))
+})
+
 test('bytecode corrompu : avertissement, et le reste de l extraction tient', () => {
   const client = makeFakeClient(tmpdir())
   fs.mkdirSync(path.join(client, 'System'), { recursive: true })
