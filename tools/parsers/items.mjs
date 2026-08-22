@@ -185,24 +185,50 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
       )
     } else {
       const { path: source, table, luaWarnings } = winner
-      for (const [id, entry] of numericEntries(table)) {
-        if (!entry || typeof entry !== 'object') continue
-        const item = ensure(id)
-        const name = pick(entry, LUA_FIELDS.name)
-        const nameUnid = pick(entry, LUA_FIELDS.nameUnid)
-        if (typeof name === 'string' && name) item.name = name
-        if (typeof nameUnid === 'string' && nameUnid) item.nameUnid = nameUnid
-        const res = pick(entry, LUA_FIELDS.res) ?? pick(entry, LUA_FIELDS.resUnid)
-        if (typeof res === 'string' && res) item.res = res
-        const slots = pick(entry, LUA_FIELDS.slots)
-        if (typeof slots === 'number') item.slots = slots
-        const classNum = pick(entry, LUA_FIELDS.classNum)
-        if (typeof classNum === 'number') item.classNum = classNum
-        const desc = textLines(entry.identifiedDescriptionName)
-        if (desc.length) item.desc = desc
-        const descUnid = textLines(entry.unidentifiedDescriptionName)
-        if (descUnid.length) item.descUnid = descUnid
+      const analysis = analyzeItemTable(table)
+
+      if (analysis.shape === 'noms') {
+        // Table id -> nom : c'est parfois tout ce qu'un client embarque.
+        for (const [id, name] of analysis.entries) ensure(id).name = name
+      } else {
+        // Sans champs reconnus, on les identifie par leurs valeurs plutot que
+        // de renoncer : un nom est une chaine presque toujours differente, un
+        // nombre de slots un petit entier, une description une liste de lignes.
+        const inferred = analysis.named ? null : inferFields(analysis.entries)
+        if (inferred) {
+          warnings.push(
+            `${source} : champs deduits — nom=${inferred.name ?? 'aucun'}, ` +
+            `slots=${inferred.slots ?? 'aucun'}, description=${inferred.desc ?? 'aucune'}. ` +
+            `Verifie deux ou trois items dans l'app.`
+          )
+        }
+
+        const nameFields = inferred?.name ? [inferred.name, ...LUA_FIELDS.name] : LUA_FIELDS.name
+        const slotFields = inferred?.slots ? [inferred.slots, ...LUA_FIELDS.slots] : LUA_FIELDS.slots
+
+        for (const [id, entry] of analysis.entries) {
+          const item = ensure(id)
+          const name = pick(entry, nameFields)
+          const nameUnid = pick(entry, LUA_FIELDS.nameUnid)
+          if (typeof name === 'string' && name) item.name = name
+          if (typeof nameUnid === 'string' && nameUnid) item.nameUnid = nameUnid
+
+          const res = pick(entry, LUA_FIELDS.res) ?? pick(entry, LUA_FIELDS.resUnid)
+          if (typeof res === 'string' && res) item.res = res
+
+          const slots = pick(entry, slotFields)
+          if (typeof slots === 'number') item.slots = slots
+
+          const classNum = pick(entry, LUA_FIELDS.classNum)
+          if (typeof classNum === 'number') item.classNum = classNum
+
+          const desc = textLines(entry.identifiedDescriptionName ?? (inferred?.desc ? entry[inferred.desc] : undefined))
+          if (desc.length) item.desc = desc
+          const descUnid = textLines(entry.unidentifiedDescriptionName)
+          if (descUnid.length) item.descUnid = descUnid
+        }
       }
+
       sources.push(source)
       for (const w of luaWarnings || []) warnings.push(`${source} : ${w}`)
     }

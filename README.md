@@ -114,8 +114,10 @@ les fichiers dont le nom évoque les items, puis les plus gros fichiers Lua du c
 traite les candidats du plus gros au plus petit. Une lecture qui échoue est signalée, jamais
 avalée. La table est reconnue sur deux niveaux de preuve : des champs connus
 (`identifiedDisplayName`…), ou, à défaut, la seule forme — beaucoup d'identifiants dans la
-plage des items associés à des objets ou à des chaînes, les champs étant alors identifiés
-par leurs valeurs.
+plage des items associés à des objets ou à des chaînes. Dans ce second cas les champs sont
+identifiés **par leurs valeurs** — un nom est une chaîne présente partout et presque toujours
+différente, un nombre de slots un petit entier, une description une liste de lignes — et la
+déduction est annoncée dans les avertissements, à vérifier sur deux ou trois items.
 
 **Le bytecode Lua est exécuté, pas décompilé.** Les clients récents ne livrent plus une
 seule table en clair : `itemInfo`, `npcidentity`, `jobname`, toute la navigation sont du
@@ -189,7 +191,7 @@ pour caler le parseur sans deviner.
 ## Développement
 
 ```bash
-npm test          # 57 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
+npm test          # 59 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
 npm run build     # typecheck + build statique
 ```
 

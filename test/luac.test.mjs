@@ -130,3 +130,16 @@ test('table absente : toleree, le reste du fichier continue', () => {
   assert.ok(loose > 0, 'les acces tolerees devraient etre comptes')
   assert.equal(toPlain(env).Presente.ok, true)
 })
+
+test('champs renommes : identifies par leurs valeurs, pas par leurs noms', async () => {
+  const { analyzeItemTable } = await import('../tools/parsers/items.mjs')
+  const { loadLua } = await import('../tools/luadata.mjs')
+  const buf = fs.readFileSync(path.join(FIXTURES, 'renamed.lub'))
+  const { env } = loadLua(buf, { includeTables: true })
+
+  const analysis = analyzeItemTable(env.ItemTable)
+  assert.ok(analysis, 'table non reconnue')
+  assert.equal(analysis.shape, 'objet')
+  assert.equal(analysis.named, 0) // aucun champ ne porte un nom attendu
+  assert.equal(analysis.entries.length, 80)
+})

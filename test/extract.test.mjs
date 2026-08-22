@@ -238,3 +238,33 @@ test('la vraie base est trouvee meme derriere un talon au chemin attendu', () =>
   assert.ok(meta.sources.some((s) => /datainfo[\\/]iteminfo\.lub/.test(s)), meta.sources.join(' | '))
 })
 
+
+test('base aux champs inconnus : les items sortent quand meme nommes', () => {
+  const client = makeFakeClient(tmpdir())
+  const entries = readGrfEntries(path.join(client, 'data.grf'))
+  delete entries['System\\itemInfo.lub']
+  // On retire aussi les tables texte : le .lub renomme est la seule source.
+  for (const key of Object.keys(entries)) {
+    if (/idnum2item|itemslotcount/i.test(key)) delete entries[key]
+  }
+  writeGrf(path.join(client, 'data.grf'), entries)
+
+  const dir = path.join(client, 'data', 'luafiles514', 'lua files', 'datainfo')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.copyFileSync(
+    path.join(ROOT, 'test', 'fixtures', 'renamed.lub'),
+    path.join(dir, 'iteminfo.lub')
+  )
+
+  const out = path.join(tmpdir(), 'data')
+  const { items, meta } = runExtract(client, out)
+
+  assert.equal(Object.keys(items).length, 80)
+  assert.equal(items['501'].name, 'Objet 1')
+  assert.equal(items['580'].name, 'Objet 80')
+  assert.equal(items['503'].slots, 3)
+  assert.deepEqual(items['501'].desc, ['Ligne A 1', 'Ligne B'])
+
+  // La deduction est annoncee : c'est elle qu'on ira verifier si un nom surprend.
+  assert.ok(meta.warnings.some((w) => /champs deduits/.test(w)), meta.warnings.join(' | '))
+})
