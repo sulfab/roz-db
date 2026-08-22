@@ -264,6 +264,8 @@ class Vm {
     // donnees declarent parfois leur table en local : elle n'apparait alors
     // dans aucune globale, alors qu'elle contient tout ce qu'on cherche.
     this.tables = []
+    /** Acces a des tables absentes, tolerees plutot que fatales. */
+    this.loose = 0
   }
 
   call(fn, args, name) {
@@ -316,13 +318,22 @@ class Vm {
 
         case OP.GETTABLE: {
           const t = R[b]
-          if (!(t instanceof LuaTable)) throw new LuaError(`indexation de ${typeName(t)}`)
+          // Un fichier de donnees indexe parfois une table posee par un autre
+          // fichier, absente ici : renvoyer nil vaut mieux qu'abandonner tout
+          // ce qui a deja ete construit.
+          if (!(t instanceof LuaTable)) { this.loose++; R[a] = null; break }
           R[a] = t.get(RK(c))
           break
         }
         case OP.SETTABLE: {
-          const t = R[a]
-          if (!(t instanceof LuaTable)) throw new LuaError(`affectation dans ${typeName(t)}`)
+          let t = R[a]
+          if (!(t instanceof LuaTable)) {
+            // Meme raison : on cree la table manquante au lieu d'echouer.
+            this.loose++
+            t = new LuaTable()
+            this.tables.push(t)
+            R[a] = t
+          }
           t.set(RK(b), RK(c))
           break
         }
@@ -637,18 +648,39 @@ function makeEnv() {
  *   restent exploitables. `missing` liste les fonctions du client appelees en
  *   vain. `tables` contient toutes les tables construites, y compris locales.
  */
-export function runCompiled(buf, { env = makeEnv(), maxSteps } = {}) {
+export function runCompiled(buf, { env = makeEnv(), maxSteps, callMain = true } = {}) {
   const proto = undump(buf)
   const vm = new Vm(env, { maxSteps })
+  const result = () => ({
+    env,
+    missing: [...vm.missing],
+    tables: vm.tables,
+    loose: vm.loose,
+  })
+
   try {
     vm.call(new Closure(proto, []), [])
-    return { env, error: null, missing: [...vm.missing], tables: vm.tables }
   } catch (err) {
-    if (err instanceof LuaError || err instanceof RangeError || err instanceof TypeError) {
-      return { env, error: err.message, missing: [...vm.missing], tables: vm.tables }
-    }
-    throw err
+    if (!(err instanceof LuaError || err instanceof RangeError || err instanceof TypeError)) throw err
+    return { ...result(), error: err.message }
   }
+
+  // Beaucoup de fichiers officiels se contentent de definir main() : c'est le
+  // client de jeu qui l'appelle, et c'est la que les tables sont construites.
+  // Sans cet appel, le fichier s'execute sans rien produire.
+  if (callMain) {
+    const main = env.get('main')
+    if (main instanceof Closure) {
+      try {
+        vm.call(main, [])
+      } catch (err) {
+        if (!(err instanceof LuaError || err instanceof RangeError || err instanceof TypeError)) throw err
+        return { ...result(), error: `main() : ${err.message}` }
+      }
+    }
+  }
+
+  return { ...result(), error: null }
 }
 
 export { makeEnv }

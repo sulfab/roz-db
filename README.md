@@ -107,14 +107,24 @@ data/ en clair ───────────────┘   (priorité com
 
 Trois points méritent d'être connus :
 
+**Le fichier d'items est cherché, pas supposé.** Sur Ragnarok Zero,
+`System/itemInfo_true.lub` ne fait que 162 octets : c'est un talon. L'extraction essaie donc
+les chemins connus, puis cherche les fichiers dont le nom évoque les items, du plus gros au
+plus petit — une base d'items pèse des centaines de kilo-octets, ce qui la place en tête — et
+retient celui dont la table contient le plus d'entrées reconnaissables.
+
 **Le bytecode Lua est exécuté, pas décompilé.** Les clients récents ne livrent plus une
 seule table en clair : `itemInfo`, `npcidentity`, `jobname`, toute la navigation sont du
 bytecode Lua 5.1. Décompiler redonnerait du source qu'il faudrait reparser ; `luac.mjs`
 va plus court en *exécutant* le chunk dans une petite machine virtuelle et en récupérant
 les globales qu'il a définies — ces fichiers sont de la donnée, ils construisent des tables
 et s'arrêtent. Les fonctions attendues du client (`main()` appelle `AddItem`) sont absentes :
-elles sont notées et ignorées, la table est déjà construite. `luadata.mjs` masque la
-différence, les parseurs ne savent pas s'ils lisent du source ou du bytecode.
+elles sont notées et ignorées, la table est déjà construite. Beaucoup de fichiers officiels
+se contentent de **définir** `main()` sans l'appeler — c'est le client qui le fait : la VM
+l'appelle donc aussi, sans quoi le fichier s'exécute sans rien produire. Et un fichier qui
+écrit dans une table posée par un autre fichier ne fait pas échouer l'exécution : la table
+manquante est créée. `luadata.mjs` masque la différence, les parseurs ne savent pas s'ils
+lisent du source ou du bytecode.
 
 **Le VFS respecte la priorité du client.** Un fichier en clair dans `data/` prime sur les
 archives, et l'ordre des `.grf` suit `DATA.INI`. Sans ça on lirait des données périmées là
@@ -171,7 +181,7 @@ pour caler le parseur sans deviner.
 ## Développement
 
 ```bash
-npm test          # 54 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
+npm test          # 56 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
 npm run build     # typecheck + build statique
 ```
 

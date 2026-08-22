@@ -133,5 +133,13 @@ export function extractMobs(vfs, { encoding = 'auto' } = {}) {
     )
   }
 
-  return { mobs, constants, sources, warnings }
+  // Les plages d'ids servent a ecarter les classes de joueur d'une liste
+  // generique. Pour la jointure avec la navigation, elles n'ont pas a decider :
+  // un sprite present dans un fichier de monstres est un monstre.
+  const spriteToId = new Map()
+  for (const [id, sprite] of sprites) {
+    if (typeof sprite === 'string' && sprite) spriteToId.set(sprite.toUpperCase(), id)
+  }
+
+  return { mobs, constants, sprites, spriteToId, sources, warnings }
 }

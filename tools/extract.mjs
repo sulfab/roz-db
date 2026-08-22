@@ -5,7 +5,7 @@ import { openClient } from './vfs.mjs'
 import { decode } from './encoding.mjs'
 import { parseMapNameTable } from './parsers/tables.mjs'
 import { extractItems } from './parsers/items.mjs'
-import { extractMobs, looksLikeMobId, prettifySprite } from './parsers/mobs.mjs'
+import { extractMobs, prettifySprite } from './parsers/mobs.mjs'
 import { extractSpawns } from './parsers/navi.mjs'
 
 import { resolveClientDir, ROOT } from './client-path.mjs'
@@ -106,11 +106,15 @@ async function main() {
 
   // --- spawns -------------------------------------------------------------
   // Le sprite est la cle de jointure quand les fichiers de navigation ne
-  // portent pas d'identifiant de mob.
-  const spriteToId = new Map()
+  // portent pas d'identifiant de mob. On prend la table complete de
+  // jobname.lub : restreindre aux plages d'ids connues ferait perdre les
+  // monstres ajoutes par Zero hors de ces plages.
+  const spriteToId = new Map(mobResult.spriteToId)
   for (const mob of mobResult.mobs.values()) {
     if (mob.sprite) spriteToId.set(mob.sprite.toUpperCase(), mob.id)
   }
+  const spriteById = new Map()
+  for (const [sprite, id] of spriteToId) if (!spriteById.has(id)) spriteById.set(id, sprite)
 
   const spawnResult = extractSpawns(vfs, {
     encoding: args.encoding,
@@ -135,10 +139,17 @@ async function main() {
 
   const spawnIndex = new Map() // `${mobId}@${map}` -> amount
   for (const spawn of spawnResult.spawns) {
-    if (!looksLikeMobId(spawn.mobId)) continue
     let mob = mobs.get(spawn.mobId)
     if (!mob) {
-      mob = { id: spawn.mobId, name: spawn.name || `Mob ${spawn.mobId}`, nameSource: 'navi' }
+      // Apparaitre dans un fichier de navigation de monstres suffit a etre un
+      // monstre : la plage d'ids n'a pas a trancher contre cette evidence.
+      const sprite = spriteById.get(spawn.mobId)
+      mob = {
+        id: spawn.mobId,
+        name: sprite ? prettifySprite(sprite) : (spawn.name || `Mob ${spawn.mobId}`),
+        sprite,
+        nameSource: sprite ? 'sprite' : 'navi',
+      }
       mobs.set(spawn.mobId, mob)
     }
     // Le nom du fichier de navigation prime sur le sprite, a condition d'etre

@@ -49,7 +49,7 @@ export function loadLua(buffer, { encoding = 'auto', env = null, includeTables =
     }
   }
 
-  const { env: result, error, missing, tables } = runCompiled(buffer, { env: runtime })
+  const { env: result, error, missing, tables, loose } = runCompiled(buffer, { env: runtime })
 
   // La bibliotheque standard n'est pas une donnee du fichier : on la retire.
   for (const key of builtins) result.hash.delete(key)
@@ -64,6 +64,7 @@ export function loadLua(buffer, { encoding = 'auto', env = null, includeTables =
     // Purement informatif : ces fonctions sont fournies par le client de jeu,
     // leur absence n'empeche pas de recuperer les tables.
     missing,
+    loose,
     compiled: true,
   }
 }

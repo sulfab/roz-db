@@ -23,6 +23,24 @@ const ITEM_INFO_CANDIDATES = [
   'data/luafiles514/lua files/datainfo/iteminfo_true.lub',
 ]
 
+/**
+ * Les chemins connus ne suffisent pas toujours : sur Ragnarok Zero,
+ * System/itemInfo_true.lub ne fait que 162 octets — un talon. On cherche donc
+ * la vraie table parmi les fichiers dont le nom evoque les items, du plus gros
+ * au plus petit : une base d'items pese des centaines de kilo-octets, ce qui
+ * la place en tete sans avoir a deviner son chemin.
+ */
+const DISCOVERY_LIMIT = 12
+const DISCOVERY_MIN_SIZE = 4096
+
+function discoverItemFiles(vfs) {
+  return vfs
+    .list((key) => /item.*\.(lub|lua)$/.test(key) && !/table\.txt$/.test(key))
+    .filter((entry) => entry.size >= DISCOVERY_MIN_SIZE)
+    .sort((a, b) => b.size - a.size)
+    .slice(0, DISCOVERY_LIMIT)
+}
+
 const TEXT_TABLES = {
   displayName: 'data/idnum2itemdisplaynametable.txt',
   resName: 'data/idnum2itemresnametable.txt',
@@ -75,46 +93,76 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
   }
 
   // --- 1. itemInfo.lub ----------------------------------------------------
+  const tried = []
+  const attempts = []
+
   const found = vfs.readAny(ITEM_INFO_CANDIDATES)
-  if (!found) {
-    warnings.push(`Aucun itemInfo trouve (cherche : ${ITEM_INFO_CANDIDATES.join(', ')})`)
+  if (found) attempts.push({ path: found.path, buffer: found.buffer })
+
+  const read = (entry) => {
+    try { return vfs.read(entry.name) } catch { return null }
+  }
+  for (const entry of discoverItemFiles(vfs)) {
+    if (attempts.some((a) => a.path === entry.name)) continue
+    const buffer = read(entry)
+    if (buffer) attempts.push({ path: entry.name, buffer, size: entry.size })
+  }
+
+  if (!attempts.length) {
+    warnings.push(`Aucun fichier d'items trouve (cherche : ${ITEM_INFO_CANDIDATES.join(', ')})`)
   } else {
-    try {
-      const { env, tables, warnings: luaWarnings } = loadLua(found.buffer, {
-        encoding,
-        includeTables: true,
-      })
-      const table = findItemTable(env) || bestItemTable(tables)
-      if (!table) {
-        warnings.push(
-          `${found.path} : aucune table d'items reconnue. ` +
-          describeTables(env, tables) +
-          ` Lance \`npm run dump -- "${found.path}"\` et envoie la sortie.`
-        )
-      } else {
-        for (const [id, entry] of numericEntries(table)) {
-          if (!entry || typeof entry !== 'object') continue
-          const item = ensure(id)
-          const name = pick(entry, LUA_FIELDS.name)
-          const nameUnid = pick(entry, LUA_FIELDS.nameUnid)
-          if (typeof name === 'string' && name) item.name = name
-          if (typeof nameUnid === 'string' && nameUnid) item.nameUnid = nameUnid
-          const res = pick(entry, LUA_FIELDS.res) ?? pick(entry, LUA_FIELDS.resUnid)
-          if (typeof res === 'string' && res) item.res = res
-          const slots = pick(entry, LUA_FIELDS.slots)
-          if (typeof slots === 'number') item.slots = slots
-          const classNum = pick(entry, LUA_FIELDS.classNum)
-          if (typeof classNum === 'number') item.classNum = classNum
-          const desc = textLines(entry.identifiedDescriptionName)
-          if (desc.length) item.desc = desc
-          const descUnid = textLines(entry.unidentifiedDescriptionName)
-          if (descUnid.length) item.descUnid = descUnid
+    let winner = null
+    for (const attempt of attempts) {
+      try {
+        const { env, tables, warnings: luaWarnings } = loadLua(attempt.buffer, {
+          encoding,
+          includeTables: true,
+        })
+        const table = findItemTable(env) || bestItemTable(tables)
+        const score = table ? scoreItemTable(table) : 0
+        tried.push({ path: attempt.path, score, env, tables })
+        if (table && (!winner || score > winner.score)) {
+          winner = { path: attempt.path, table, score, luaWarnings }
         }
-        sources.push(found.path)
-        for (const w of luaWarnings) warnings.push(`${found.path} : ${w}`)
+      } catch (err) {
+        tried.push({ path: attempt.path, score: 0, error: err.message })
       }
-    } catch (err) {
-      warnings.push(`${found.path} : ${err.message}`)
+      // Une base d'items complete se reconnait tout de suite : inutile de
+      // continuer a executer des fichiers une fois qu'on la tient.
+      if (winner && winner.score >= 100) break
+    }
+
+    if (!winner) {
+      const detail = tried.slice(0, 4)
+        .map((t) => `${t.path}${t.error ? ` (${t.error})` : ''}`)
+        .join(', ')
+      warnings.push(
+        `Aucune table d'items reconnue parmi ${tried.length} fichier(s) : ${detail}. ` +
+        (tried[0] && tried[0].env ? describeTables(tried[0].env, tried[0].tables) : '') +
+        ` Lance \`npm run dump -- "<fichier>"\` et envoie la sortie.`
+      )
+    } else {
+      const { path: source, table, luaWarnings } = winner
+      for (const [id, entry] of numericEntries(table)) {
+        if (!entry || typeof entry !== 'object') continue
+        const item = ensure(id)
+        const name = pick(entry, LUA_FIELDS.name)
+        const nameUnid = pick(entry, LUA_FIELDS.nameUnid)
+        if (typeof name === 'string' && name) item.name = name
+        if (typeof nameUnid === 'string' && nameUnid) item.nameUnid = nameUnid
+        const res = pick(entry, LUA_FIELDS.res) ?? pick(entry, LUA_FIELDS.resUnid)
+        if (typeof res === 'string' && res) item.res = res
+        const slots = pick(entry, LUA_FIELDS.slots)
+        if (typeof slots === 'number') item.slots = slots
+        const classNum = pick(entry, LUA_FIELDS.classNum)
+        if (typeof classNum === 'number') item.classNum = classNum
+        const desc = textLines(entry.identifiedDescriptionName)
+        if (desc.length) item.desc = desc
+        const descUnid = textLines(entry.unidentifiedDescriptionName)
+        if (descUnid.length) item.descUnid = descUnid
+      }
+      sources.push(source)
+      for (const w of luaWarnings || []) warnings.push(`${source} : ${w}`)
     }
   }
 

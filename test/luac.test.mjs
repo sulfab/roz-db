@@ -102,3 +102,31 @@ test('table declaree en local : retrouvee parmi les tables construites', async (
   assert.equal(itemTable['1202'].slotCount, 3)
   assert.equal(itemTable['2104'].identifiedResourceName, 'guard')
 })
+
+test('fichier qui se contente de definir main() : il faut l appeler', async () => {
+  const { loadLua } = await import('../tools/luadata.mjs')
+  const buf = fs.readFileSync(path.join(FIXTURES, 'iteminfo_main.lub'))
+
+  // Sans appel, le chunk s'execute sans rien construire : c'est exactement ce
+  // que donnait System/itemInfo_true.lub d'un vrai client.
+  const inerte = runCompiled(buf, { callMain: false })
+  assert.equal(inerte.tables.length, 0)
+
+  const { tables } = loadLua(buf, { includeTables: true })
+  const itemTable = tables.find((t) => t && t['501'] && t['501'].identifiedDisplayName)
+  assert.ok(itemTable, 'table d items introuvable apres appel de main()')
+  assert.equal(itemTable['501'].identifiedDisplayName, 'Red Potion')
+  assert.equal(itemTable['2104'].slotCount, 1)
+})
+
+
+test('table absente : toleree, le reste du fichier continue', () => {
+  const buf = fs.readFileSync(path.join(FIXTURES, 'loose.lub'))
+  const { env, error, loose } = runCompiled(buf)
+
+  // Lua s'arreterait ici ; nous, on cree la table manquante et on poursuit,
+  // sinon un fichier de donnees perd tout ce qu'il a construit avant.
+  assert.equal(error, null)
+  assert.ok(loose > 0, 'les acces tolerees devraient etre comptes')
+  assert.equal(toPlain(env).Presente.ok, true)
+})
