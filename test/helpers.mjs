@@ -203,11 +203,18 @@ Navi_MobDATA = {
     'prontera.rsw#Prontera#',
   ].join('\n')
 
+  // Le vrai client livre le meme jeu de spawns en 19 langues : on en met
+  // plusieurs pour que les tests attrapent tout cumul accidentel.
+  const naviFr = naviMob.replace(/"Poring"/g, '"Poring FR"')
+  const naviKr = naviMob.replace(/"Poring"/g, '"Poring KR"')
+
   writeGrf(path.join(dir, 'data.grf'), {
     'System/itemInfo.lub': itemInfo,
     'data/luafiles514/lua files/datainfo/npcidentity.lub': npcIdentity,
     'data/luafiles514/lua files/datainfo/jobname.lub': jobName,
-    'data/luafiles514/lua files/navigation/navi_mob_krzero.lub': naviMob,
+    'data/luafiles514/lua files/navigation/navi_mob.lub': naviMob,
+    'data/luafiles514/lua files/navigation/navi_mob_frfr.lub': naviFr,
+    'data/luafiles514/lua files/navigation/navi_mob_kokr.lub': naviKr,
     'data/mapnametable.txt': mapNames,
     'data/idnum2itemdisplaynametable.txt': '501#Red Potion#\n909#Jellopy#\n1202#Knife#\n4001#Poring Card#\n2104#Guard#\n',
     'data/idnum2itemresnametable.txt': '501#red_potion#\n909#jellopy#\n2104#guard#\n',

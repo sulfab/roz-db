@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import fs from 'node:fs'
+import path from 'node:path'
 import zlib from 'node:zlib'
+import { storedClientDir } from './client-path.mjs'
 
 /**
  * Diagnostic d'archive GRF.
@@ -85,8 +87,19 @@ function looksLikeFileTable(table) {
   return { ok: ok >= 5, sample }
 }
 
+/** Accepte une archive, un dossier client, ou rien si un client est memorise. */
+function resolveArchive(arg) {
+  const candidate = arg || storedClientDir()
+  if (!candidate) return null
+  if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+    const grf = fs.readdirSync(candidate).find((f) => f.toLowerCase().endsWith('.grf'))
+    return grf ? path.join(candidate, grf) : null
+  }
+  return candidate
+}
+
 function main() {
-  const target = process.argv[2]
+  const target = resolveArchive(process.argv[2])
   if (!target) {
     console.error('Usage : node tools/probe-grf.mjs "C:/Gravity/RagnarokZero/data.grf"')
     process.exit(1)

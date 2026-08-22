@@ -18,6 +18,33 @@ export function findNaviMobFiles(vfs) {
     .map((e) => e.name)
 }
 
+/**
+ * Le client livre le meme jeu de spawns en 19 langues. Les lire tous
+ * multiplierait chaque population par 19 : on n'en garde qu'un, celui dont les
+ * noms de mobs seront lisibles.
+ *
+ * @param {string[]} files
+ * @param {string} language suffixe prefere (frfr, enus, kokr...)
+ * @returns {{file: string|null, alternatives: string[]}}
+ */
+export function pickNaviFile(files, language = 'frfr') {
+  if (!files.length) return { file: null, alternatives: [] }
+
+  const suffix = (name) => {
+    const m = /navi_mob(?:_([a-z]+))?\.(?:lub|lua)$/i.exec(name.replace(/\\/g, '/'))
+    return m ? (m[1] || '') : null
+  }
+
+  // Ordre de preference : la langue demandee, puis l'anglais, puis le fichier
+  // sans suffixe (le defaut du client), puis le coreen d'origine.
+  const preference = [language, 'enus', '', 'krpri', 'kokr']
+  for (const wanted of preference) {
+    const found = files.find((f) => suffix(f) === wanted)
+    if (found) return { file: found, alternatives: files.filter((f) => f !== found) }
+  }
+  return { file: files[0], alternatives: files.slice(1) }
+}
+
 const isInt = (v) => typeof v === 'number' && Number.isInteger(v)
 
 /**
@@ -158,20 +185,25 @@ function collectRows(env) {
  * @returns {{spawns: Array<{map: string, mobId: number, name?: string, level?: number, amount: number}>,
  *            columns: object, confidence: object, warnings: string[], files: string[]}}
  */
-export function extractSpawns(vfs, { encoding = 'auto', knownMaps = new Set(), knownMobIds = new Set() } = {}) {
+export function extractSpawns(vfs, {
+  encoding = 'auto', knownMaps = new Set(), knownMobIds = new Set(), language = 'frfr',
+} = {}) {
   const warnings = []
-  const files = findNaviMobFiles(vfs)
+  const available = findNaviMobFiles(vfs)
   const spawns = []
   let columns = null
   let confidence = null
 
-  if (!files.length) {
+  if (!available.length) {
     warnings.push(
       'Aucun fichier navi_mob_*.lub dans le client : pas de lien mob -> carte. ' +
       'Les zones resteront vides tant qu\'une autre source ne les fournit pas.'
     )
-    return { spawns, columns, confidence, warnings, files }
+    return { spawns, columns, confidence, warnings, files: [], available }
   }
+
+  const { file: chosen, alternatives } = pickNaviFile(available, language)
+  const files = [chosen]
 
   for (const file of files) {
     const buf = vfs.read(file)
@@ -217,5 +249,12 @@ export function extractSpawns(vfs, { encoding = 'auto', knownMaps = new Set(), k
     }
   }
 
-  return { spawns, columns, confidence, warnings, files }
+  if (!spawns.length && alternatives.length) {
+    warnings.push(
+      `${chosen} n'a rien donne ; ${alternatives.length} autre(s) langue(s) disponible(s), ` +
+      `relance avec --language <code>.`
+    )
+  }
+
+  return { spawns, columns, confidence, warnings, files, available }
 }

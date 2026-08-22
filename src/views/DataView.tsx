@@ -37,6 +37,17 @@ export function DataView({ db }: { db: Db }) {
               <dd>{meta.counts.maps.toLocaleString('fr-FR')}</dd>
               <dt>Spawns</dt>
               <dd>{meta.counts.spawns.toLocaleString('fr-FR')}</dd>
+              {meta.naviFile && (
+                <>
+                  <dt>Navigation</dt>
+                  <dd>
+                    <code>{meta.naviFile}</code>
+                    {(meta.naviAvailable ?? 0) > 1 && (
+                      <span className="muted"> · {meta.naviAvailable} langues disponibles</span>
+                    )}
+                  </dd>
+                </>
+              )}
             </dl>
           </Section>
 

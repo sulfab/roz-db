@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { openClient } from './vfs.mjs'
 import { describeLua } from './luadata.mjs'
 import { looksUtf8, isAscii } from './encoding.mjs'
+import { resolveClientDir } from './client-path.mjs'
 
 /**
  * Inventaire du client : qu'est-ce qui est reellement present, et sous quelle
@@ -55,10 +56,7 @@ function classify(buf) {
 function main() {
   const argv = process.argv.slice(2)
   const full = argv.includes('--full')
-  const clientDir = argv.find((a) => !a.startsWith('-')) ||
-    (fs.existsSync(path.join(ROOT, '.client-path'))
-      ? fs.readFileSync(path.join(ROOT, '.client-path'), 'utf8').trim()
-      : null)
+  const clientDir = resolveClientDir(argv.find((a) => !a.startsWith('-')))
 
   if (!clientDir) {
     console.error('Usage : node tools/scan.mjs "C:\\Gravity\\Ragnarok Zero" [--full]')
@@ -126,6 +124,7 @@ function main() {
   console.log('\nRapport ecrit dans scan-report.json.')
   console.log('Le bytecode Lua 5.1 est execute a l\'extraction : marque [v], il est exploitable.')
   console.log('Les lignes [!] sont ce que l\'extraction ne sait pas lire.')
+  console.log('\nChemin du client memorise : `npm run extract` suffit desormais.')
 }
 
 /** Repartition par extension du dossier data/ en clair. */

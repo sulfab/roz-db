@@ -55,6 +55,9 @@ export interface Meta {
   counts: { items: number; mobs: number; maps: number; spawns: number; mobsWithSpawns: number }
   naviColumns: Record<string, number> | null
   naviConfidence: Record<string, number> | null
+  /** Fichier de navigation retenu parmi les langues disponibles. */
+  naviFile?: string | null
+  naviAvailable?: number
   sources: string[]
   warnings: string[]
 }

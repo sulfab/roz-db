@@ -25,8 +25,9 @@ Avant la première extraction, un inventaire du client dit ce qui est exploitabl
 npm run scan -- "C:\Gravity\Ragnarok Zero"
 ```
 
-Il liste les archives, les fichiers attendus, et marque `[!]` ceux qui sont en **bytecode Lua
-compilé** (illisibles tels quels). Le rapport complet part dans `scan-report.json`.
+Il liste les archives, les fichiers attendus et leur état — `[v]` exploitable, `[!]` illisible,
+`[x]` absent. Le rapport complet part dans `scan-report.json`. Le chemin du client est mémorisé
+dès la première commande qui le reçoit : `npm run extract` seul suffit ensuite.
 
 ## Ce que le client contient — et ce qu'il ne contient pas
 
@@ -97,6 +98,12 @@ différence, les parseurs ne savent pas s'ils lisent du source ou du bytecode.
 archives, et l'ordre des `.grf` suit `DATA.INI`. Sans ça on lirait des données périmées là
 où le jeu, lui, lit la version patchée.
 
+**Une seule langue de navigation est lue.** Le client livre le même jeu de spawns en 19
+langues (`navi_mob_frfr.lub`, `navi_mob_enus.lub`, …). Les lire toutes multiplierait chaque
+population par 19 : l'extraction n'en retient qu'une — le français par défaut, puis l'anglais,
+puis le fichier sans suffixe. `--language enus` pour changer ; le fichier retenu est affiché
+en fin d'extraction et dans l'écran **Données**.
+
 **Les colonnes des fichiers de navigation sont déduites, pas supposées.** Leur ordre change
 d'une version à l'autre. `navi.mjs` identifie la carte et l'id du mob par recoupement avec
 les données déjà extraites, puis sépare *niveau* et *population* par un critère simple : le
@@ -127,7 +134,7 @@ coréens, UTF-8 des repacks). En cas de doute : `npm run extract -- --encoding c
 ## Développement
 
 ```bash
-npm test          # 42 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
+npm test          # 44 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
 npm run build     # typecheck + build statique
 ```
 
@@ -149,6 +156,7 @@ tools/          chaîne d'extraction (Node, sans build)
   parsers/      items, mobs, navigation, tables texte
   extract.mjs   orchestration → public/data/*.json
   scan.mjs      inventaire du client
+  client-path.mjs  chemin du client, mémorisé et partagé entre les outils
   probe-grf.mjs diagnostic d'archive GRF
   icons.mjs     BMP → PNG
   import-drops.mjs

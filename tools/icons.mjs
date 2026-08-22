@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PNG } from 'pngjs'
 import { openClient } from './vfs.mjs'
+import { resolveClientDir } from './client-path.mjs'
 
 /**
  * Icones d'items : BMP dans le GRF -> PNG sur disque.
@@ -103,8 +104,7 @@ function main() {
     else if (argv[i] === '--collection') collection = true
     else if (!argv[i].startsWith('-') && !client) client = argv[i]
   }
-  const clientPathFile = path.join(ROOT, '.client-path')
-  if (!client && fs.existsSync(clientPathFile)) client = fs.readFileSync(clientPathFile, 'utf8').trim()
+  client = resolveClientDir(client)
   if (!client) { console.error(HELP); process.exit(1) }
 
   const itemsFile = path.join(ROOT, 'public', 'data', 'items.json')

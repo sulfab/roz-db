@@ -40,7 +40,6 @@ test('extraction complete sur un client synthetique', () => {
   assert.deepEqual(items['2104'].desc, ['Un bouclier de base.', 'Defense +3.'])
 
   // --- mobs : nom localise du navi, sprite du jobname ----------------------
-  assert.equal(mobs['1002'].name, 'Poring')
   assert.equal(mobs['1002'].sprite, 'PORING')
   assert.equal(mobs['1002'].level, 1)
   assert.equal(mobs['1039'].name, 'Baphomet')
@@ -63,6 +62,12 @@ test('extraction complete sur un client synthetique', () => {
   assert.deepEqual(maps['prontera'].mobs, [])
 
   // --- colonnes du navi deduites, pas supposees ----------------------------
+  // Le client de test a trois langues de navigation : une seule doit compter,
+  // sinon 60 deviendrait 180.
+  assert.equal(meta.naviAvailable, 3)
+  assert.match(meta.naviFile, /navi_mob_frfr/)
+  assert.equal(mobs['1002'].name, 'Poring FR') // nom issu de la langue retenue
+
   assert.deepEqual(meta.naviColumns, { map: 0, id: 1, name: 2, level: 3, amount: 4 })
   assert.ok(meta.naviConfidence.map > 0.9)
   assert.ok(meta.naviConfidence.id > 0.9)
@@ -108,7 +113,7 @@ test('bytecode corrompu : avertissement, et le reste de l extraction tient', () 
 
   // itemInfo est perdu, mais les tables texte du client de test prennent le relais
   assert.equal(items['501'].name, 'Red Potion')
-  assert.equal(mobs['1002'].name, 'Poring')
+  assert.equal(mobs['1002'].name, 'Poring FR')
   assert.ok(meta.warnings.some((w) => /tronque/.test(w)), meta.warnings.join(' | '))
 })
 

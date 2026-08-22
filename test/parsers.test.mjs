@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { parseSimpleTable, parseDescTable, parseMapNameTable, stripColorCodes } from '../tools/parsers/tables.mjs'
-import { inferColumns } from '../tools/parsers/navi.mjs'
+import { inferColumns, pickNaviFile } from '../tools/parsers/navi.mjs'
 import { prettifySprite, looksLikeMobId } from '../tools/parsers/mobs.mjs'
 import { decodeBmp } from '../tools/icons.mjs'
 
@@ -123,4 +123,30 @@ test('BMP 24 bits : couleurs et magenta transparent', () => {
 
 test('BMP invalide : null plutot qu une exception', () => {
   assert.equal(decodeBmp(Buffer.from('pas une image')), null)
+})
+
+test('une seule langue de navigation est retenue, pas les 19', () => {
+  const files = [
+    'data/luafiles514/lua files/navigation/navi_mob_eses.lub',
+    'data/luafiles514/lua files/navigation/navi_mob.lub',
+    'data/luafiles514/lua files/navigation/navi_mob_kokr.lub',
+    'data/luafiles514/lua files/navigation/navi_mob_frfr.lub',
+    'data/luafiles514/lua files/navigation/navi_mob_enus.lub',
+  ]
+
+  const fr = pickNaviFile(files, 'frfr')
+  assert.match(fr.file, /navi_mob_frfr/)
+  assert.equal(fr.alternatives.length, 4)
+
+  assert.match(pickNaviFile(files, 'enus').file, /navi_mob_enus/)
+  assert.match(pickNaviFile(files, 'kokr').file, /navi_mob_kokr/)
+
+  // Langue absente : on retombe sur l'anglais, puis sur le fichier sans suffixe.
+  assert.match(pickNaviFile(files, 'ptbr').file, /navi_mob_enus/)
+  const sansAnglais = files.filter((f) => !/enus|frfr/.test(f))
+  assert.match(pickNaviFile(sansAnglais, 'frfr').file, /navi_mob\.lub/)
+})
+
+test('aucun fichier de navigation', () => {
+  assert.deepEqual(pickNaviFile([], 'frfr'), { file: null, alternatives: [] })
 })

@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { openClient } from './vfs.mjs'
 import { decode } from './encoding.mjs'
 import { parseMapNameTable } from './parsers/tables.mjs'
@@ -9,16 +8,16 @@ import { extractItems } from './parsers/items.mjs'
 import { extractMobs, looksLikeMobId, prettifySprite } from './parsers/mobs.mjs'
 import { extractSpawns } from './parsers/navi.mjs'
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const CLIENT_PATH_FILE = path.join(ROOT, '.client-path')
+import { resolveClientDir, ROOT } from './client-path.mjs'
 
 function parseArgs(argv) {
-  const args = { out: path.join(ROOT, 'public', 'data'), encoding: 'auto' }
+  const args = { out: path.join(ROOT, 'public', 'data'), encoding: 'auto', language: 'frfr' }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--client' || a === '-c') args.client = argv[++i]
     else if (a === '--out' || a === '-o') args.out = path.resolve(argv[++i])
     else if (a === '--encoding' || a === '-e') args.encoding = argv[++i]
+    else if (a === '--language' || a === '-l') args.language = argv[++i]
     else if (a === '--verbose' || a === '-v') args.verbose = true
     else if (a === '--help' || a === '-h') args.help = true
     else if (!args.client) args.client = a
@@ -36,14 +35,10 @@ Options
                            memorise dans .client-path pour les fois suivantes
   -o, --out <dossier>      sortie JSON            (defaut : public/data)
   -e, --encoding <enc>     auto | cp949 | utf8 | cp1252   (defaut : auto)
+  -l, --language <code>    langue des noms de mobs dans les fichiers de
+                           navigation : frfr, enus, kokr...  (defaut : frfr)
   -v, --verbose            detaille les archives lues
 `
-
-function resolveClient(args) {
-  if (args.client) return args.client
-  if (fs.existsSync(CLIENT_PATH_FILE)) return fs.readFileSync(CLIENT_PATH_FILE, 'utf8').trim()
-  return null
-}
 
 function extractMapNames(vfs, encoding) {
   const buf = vfs.read('data/mapnametable.txt')
@@ -66,16 +61,15 @@ async function main() {
   const args = parseArgs(process.argv.slice(2))
   if (args.help) { console.log(HELP); return }
 
-  const clientDir = resolveClient(args)
+  const clientDir = resolveClientDir(args.client)
   if (!clientDir) {
     console.error(HELP)
-    console.error('Erreur : aucun dossier client fourni.\n')
+    console.error('Erreur : aucun dossier client fourni, et aucun memorise.\n')
     process.exit(1)
   }
 
   console.log(`Client   : ${clientDir}`)
   const vfs = openClient(clientDir, { encoding: 'cp949', verbose: args.verbose })
-  fs.writeFileSync(CLIENT_PATH_FILE, clientDir)
 
   console.log(`Archives : ${vfs.grfs.map((g) => g.name).join(', ') || 'aucune'}${vfs.looseDir ? ' + data/ en clair' : ''}`)
   for (const err of vfs.errors) console.warn(`  ! ${err}`)
@@ -101,6 +95,7 @@ async function main() {
   // --- spawns -------------------------------------------------------------
   const spawnResult = extractSpawns(vfs, {
     encoding: args.encoding,
+    language: args.language,
     knownMaps: new Set(mapNames.keys()),
     knownMobIds: new Set(mobResult.mobs.keys()),
   })
@@ -177,6 +172,8 @@ async function main() {
     },
     naviColumns: spawnResult.columns,
     naviConfidence: spawnResult.confidence,
+    naviFile: spawnResult.files[0] || null,
+    naviAvailable: (spawnResult.available || []).length,
     sources: [...new Set(sources)],
     warnings,
   }
@@ -193,6 +190,10 @@ async function main() {
   console.log(`Mobs     : ${meta.counts.mobs} (${meta.counts.mobsWithSpawns} avec au moins une zone)`)
   console.log(`Cartes   : ${meta.counts.maps}`)
   console.log(`Spawns   : ${meta.counts.spawns}`)
+  if (meta.naviFile) {
+    console.log(`Navigation : ${meta.naviFile}` +
+      (meta.naviAvailable > 1 ? `  (${meta.naviAvailable} langues disponibles, --language pour changer)` : ''))
+  }
   if (spawnResult.columns) {
     const c = spawnResult.columns
     console.log(`Colonnes navi deduites : carte=${c.map} id=${c.id} nom=${c.name} niveau=${c.level} nombre=${c.amount}`)
