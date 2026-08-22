@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import zlib from 'node:zlib'
 import { decode, pathKey } from './encoding.mjs'
+import { decryptEntry } from './des.mjs'
 
 /**
  * Lecteur d'archives GRF (format 0x200, celui de tous les clients modernes).
@@ -48,6 +49,8 @@ export class Grf {
     this.fd = fs.openSync(path, 'r')
     /** @type {Map<string, {name: string, key: string, size: number, packed: number, aligned: number, offset: number, flags: number}>} */
     this.entries = new Map()
+    /** Nombre d'entrees dechiffrees, pour le rapport d'inventaire. */
+    this.encryptedEntries = 0
     this.#readTable()
 
   }
@@ -130,16 +133,25 @@ export class Grf {
   }
 
   readEntry(entry) {
+    const raw = this.#read(HEADER_SIZE + entry.offset, entry.aligned)
+
     if (entry.flags & (FLAG_DES_FULL | FLAG_DES_HEADER)) {
+      // Le dechiffrement porte sur les octets alignes, avant decompression.
+      decryptEntry(raw, entry.flags, entry.packed)
+      this.encryptedEntries++
+    }
+
+    if (entry.packed === entry.size) return raw.subarray(0, entry.size)
+    let out
+    try {
+      out = zlib.inflateSync(raw.subarray(0, entry.packed))
+    } catch (err) {
       throw new Error(
-        `${entry.name} est chiffre en DES dans ${this.path}. ` +
-        `Extrais-le avec GRF Editor dans un dossier data/ a cote du client, ` +
-        `l'extraction le reprendra depuis la.`
+        `${entry.name} : contenu illisible apres ${entry.flags & (FLAG_DES_FULL | FLAG_DES_HEADER) ? 'dechiffrement' : 'lecture'} ` +
+        `(${err.message}). Extrais-le avec GRF Editor dans un dossier data/ a cote du client ` +
+        `si le probleme persiste.`
       )
     }
-    const raw = this.#read(HEADER_SIZE + entry.offset, entry.aligned)
-    if (entry.packed === entry.size) return raw.subarray(0, entry.size)
-    const out = zlib.inflateSync(raw.subarray(0, entry.packed))
     return out.subarray(0, entry.size)
   }
 

@@ -74,9 +74,13 @@ npm run import-drops -- captures/drops.csv --source "encyclopédie" --base 10000
 ```
 
 La capture est **passive** : elle lit le trafic réseau, sans jamais toucher au processus du
-jeu, sans rien injecter ni modifier. Elle pilote `dumpcap`/`tshark` — installe Wireshark
-(avec Npcap) sous Windows — et détecte seule la connexion du jeu via le processus Ragnarok.
-Le fichier reste sur ta machine. Les CGU de Gravity interdisent largement les outils tiers ;
+jeu, sans rien injecter ni modifier. Elle détecte seule la connexion du jeu via le processus
+Ragnarok, et le fichier reste sur ta machine.
+
+Sous Windows, **rien à installer** : `pktmon` est livré avec Windows 10 et 11, il suffit
+d'ouvrir le terminal en administrateur. L'outil s'en sert en priorité, capture vers un `.etl`
+puis le convertit lui-même en pcapng. `dumpcap`/`tshark` (Wireshark, avec Npcap) et `tcpdump`
+restent utilisables — `--tool wireshark` pour forcer. Les CGU de Gravity interdisent largement les outils tiers ;
 une écoute passive de son propre trafic n'est pas de la triche, mais l'appréciation leur
 appartient.
 
@@ -178,8 +182,13 @@ valeurs restent cohérentes avec la taille du fichier. `npm run scan` affiche ce
 Si une archive reste refusée : `npm run probe -- "C:/Gravity/RagnarokZero/data.grf"` distingue
 « format inconnu » de « contenu chiffré » et affiche de quoi caler le lecteur.
 
-**`fichier chiffré en DES`** — rare, et non géré. Extrais-le avec GRF Editor vers un dossier
-`data/` à côté du client ; l'extraction le lira de là.
+**Entrées chiffrées dans l'archive** — certaines entrées, dont la base d'items de Ragnarok
+Zero, sont chiffrées avec une variante de DES : permutations standard, un seul tour, aucune
+clé. Selon le drapeau de l'entrée, tout le fichier est traité ou seulement son en-tête, et
+au-delà des vingt premiers blocs un bloc sur *n* est chiffré tandis qu'un sur sept est
+simplement brouillé — l'écart *n* se déduit du nombre de chiffres de la taille compressée.
+C'est géré : `tools/des.mjs`. Le contenu déchiffré étant décompressé juste après, un
+déchiffrement faux ne passe pas inaperçu, zlib le rejette.
 
 **Accents et caractères cassés** — l'encodage est détecté automatiquement (CP949 des clients
 coréens, UTF-8 des repacks). En cas de doute : `npm run extract -- --encoding cp949`.
@@ -196,7 +205,7 @@ pour caler le parseur sans deviner.
 ## Développement
 
 ```bash
-npm test          # 60 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
+npm test          # 67 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
 npm run build     # typecheck + build statique
 ```
 
@@ -212,6 +221,7 @@ assemblé moi-même n'aurait rien prouvé. Même principe pour `test/fixtures/ca
 ```
 tools/          chaîne d'extraction (Node, sans build)
   grf.mjs       lecteur d'archives GRF (0x200 et 0x300)
+  des.mjs       déchiffrement des entrées chiffrées d'une archive
   vfs.mjs       data/ en clair + archives, dans l'ordre du client
   lua.mjs       parseur Lua tolérant (fichiers .lub en clair)
   luac.mjs      désassemblage + VM Lua 5.1 (fichiers .lub compilés)

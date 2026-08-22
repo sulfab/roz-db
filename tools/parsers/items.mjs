@@ -118,10 +118,16 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
   // Tous les chemins connus, pas seulement le premier : sur Ragnarok Zero,
   // System/itemInfo_true.lub existe mais ne fait que 162 octets, et s'arreter
   // la faisait manquer la vraie base, 3,3 Mo plus loin.
+  // Le meme fichier arrive sous plusieurs ecritures : chemin connu avec des
+  // barres obliques, entree d'archive avec des antislashs. Comparer les chaines
+  // telles quelles le faisait essayer — et signaler — trois fois.
+  const seen = new Set()
   const addAll = (entries) => {
     for (const entry of entries) {
       const name = entry.name ?? entry
-      if (attempts.some((a) => a.path === name)) continue
+      const key = name.toLowerCase().replace(/\\/g, '/')
+      if (seen.has(key)) continue
+      seen.add(key)
       let buffer
       try {
         buffer = vfs.read(name)
