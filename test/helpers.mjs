@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import iconv from 'iconv-lite'
+import { openGrf } from '../tools/grf.mjs'
 
 const HEADER_SIZE = 0x2e
 
@@ -46,6 +47,40 @@ export function writeGrf(target, files) {
   sizes.writeUInt32LE(tableRaw.length, 4)
 
   fs.writeFileSync(target, Buffer.concat([header, ...blocks, sizes, tablePacked]))
+}
+
+/**
+ * Variante 0x300, telle que deduite de l'en-tete d'un vrai client Ragnarok Zero :
+ * meme en-tete de fichier, mais un en-tete de table de 12 octets au lieu de 8,
+ * et le flux compresse qui court jusqu'a la fin du fichier.
+ */
+export function writeGrf300(target, files) {
+  writeGrf(target, files)
+  const raw = fs.readFileSync(target)
+
+  const tableAt = 0x2e + raw.readUInt32LE(0x1e)
+  const packedLen = raw.readUInt32LE(tableAt)
+  const realLen = raw.readUInt32LE(tableAt + 4)
+  const stream = raw.subarray(tableAt + 8)
+
+  const head = Buffer.alloc(12)
+  head.writeUInt32LE(0, 0)          // champ inconnu, nul sur le client observe
+  head.writeUInt32LE(packedLen, 4)
+  head.writeUInt32LE(realLen, 8)
+
+  const rebuilt = Buffer.concat([raw.subarray(0, tableAt), head, stream])
+  rebuilt.write('Event Horizon\0c', 0, 'latin1')
+  rebuilt.writeUInt32LE(0x300, 0x2a)
+  fs.writeFileSync(target, rebuilt)
+}
+
+/** Relit toutes les entrees d'une archive, pour la reecrire dans un autre format. */
+export function readGrfEntries(target) {
+  const grf = openGrf(target)
+  const files = {}
+  for (const entry of grf.entries.values()) files[entry.name] = grf.readEntry(entry)
+  grf.close()
+  return files
 }
 
 export function tmpdir(prefix = 'rozdb-') {

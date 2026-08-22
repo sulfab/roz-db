@@ -77,8 +77,12 @@ function main() {
       signature: grf.signature,
     }
     report.archives.push(line)
-    const note = grf.customSignature ? `  (signature "${grf.signature}" — non standard, mais lisible)` : ''
-    console.log(`  ${name.padEnd(24)} ${line.files} fichiers  (v${line.version})${note}`)
+    line.entryLayout = grf.entryLayout
+    line.tableHeaderSize = grf.tableHeaderSize
+    console.log(`  ${name.padEnd(24)} ${line.files} fichiers  (v${line.version})`)
+    if (grf.customSignature) console.log(`      signature "${grf.signature}" — non standard, mais lisible`)
+    console.log(`      en-tete de table ${grf.tableHeaderSize} octets, entrees ${grf.entryLayout}`)
+    if (grf.skippedEntries) console.log(`      ${grf.skippedEntries} entree(s) incoherente(s) ignoree(s)`)
   }
   if (vfs.looseDir) console.log(`  data/ en clair           ${vfs.looseDir}`)
   for (const err of vfs.errors) console.log(`  ! ${err}`)

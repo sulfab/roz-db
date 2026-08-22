@@ -102,11 +102,14 @@ compilé. L'extraction retombe alors sur les tables texte de `data/` (noms, slot
 descriptions), ce qui couvre l'essentiel. Pour le reste, décompile le fichier (`unluac`,
 `luadec`) et dépose le résultat en clair dans `data/` : il sera repris automatiquement.
 
-**`signature GRF absente`** — certains clients (dont Ragnarok Zero) remplacent la chaîne
-magique `Master of Magic` par autre chose, `Event Horizon` par exemple. Le lecteur ne s'y
-fie plus : il valide sur la structure. Si l'archive reste refusée,
-`npm run probe -- "C:/Gravity/RagnarokZero/data.grf"` dit précisément où ça coince —
-en-tête différent, ou contenu réellement chiffré.
+**Archive refusée** — le client Ragnarok Zero s'écarte du GRF classique sur deux points :
+la signature annonce `Event Horizon` au lieu de `Master of Magic`, et la version est `0x300`
+(en-tête de table de 12 octets au lieu de 8). Le lecteur ne code aucun de ces détails en dur :
+il cherche le flux compressé autour de l'offset de table et retient le décalage qui décompresse
+réellement, puis choisit la disposition des entrées (offset 32 ou 64 bits) sur celle dont les
+valeurs restent cohérentes avec la taille du fichier. `npm run scan` affiche ce qu'il a retenu.
+Si une archive reste refusée : `npm run probe -- "C:/Gravity/RagnarokZero/data.grf"` distingue
+« format inconnu » de « contenu chiffré » et affiche de quoi caler le lecteur.
 
 **`fichier chiffré en DES`** — rare, et non géré. Extrais-le avec GRF Editor vers un dossier
 `data/` à côté du client ; l'extraction le lira de là.
@@ -120,7 +123,7 @@ coréens, UTF-8 des repacks). En cas de doute : `npm run extract -- --encoding c
 ## Développement
 
 ```bash
-npm test          # 30 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
+npm test          # 32 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
 npm run build     # typecheck + build statique
 ```
 
@@ -131,7 +134,7 @@ et font tourner toute la chaîne dessus : rien n'exige d'avoir le client sous la
 
 ```
 tools/          chaîne d'extraction (Node, sans build)
-  grf.mjs       lecteur d'archives GRF 0x200
+  grf.mjs       lecteur d'archives GRF (0x200 et 0x300)
   vfs.mjs       data/ en clair + archives, dans l'ordre du client
   lua.mjs       parseur Lua tolérant (les .lub sont du Lua)
   parsers/      items, mobs, navigation, tables texte

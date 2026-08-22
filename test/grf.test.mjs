@@ -4,7 +4,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { openGrf } from '../tools/grf.mjs'
 import { openClient } from '../tools/vfs.mjs'
-import { writeGrf, tmpdir } from './helpers.mjs'
+import { makeFakeClient, readGrfEntries } from './helpers.mjs'
+import { writeGrf, writeGrf300, tmpdir } from './helpers.mjs'
 
 test('lecture d une archive GRF 0x200', () => {
   const dir = tmpdir()
@@ -119,4 +120,39 @@ test('offset de table aberrant : refus explicite', () => {
   fs.writeFileSync(grfPath, raw)
 
   assert.throws(() => openGrf(grfPath), /hors limites/)
+})
+
+test('GRF 0x300 : en-tete de table plus long, decouvert et non suppose', () => {
+  const dir = tmpdir()
+  const grfPath = path.join(dir, 'data.grf')
+  writeGrf300(grfPath, {
+    'data/mapnametable.txt': 'prontera.rsw#Prontera#\n',
+    'data/idnum2itemdisplaynametable.txt': '501#Red Potion#\n909#Jellopy#\n',
+    'System/itemInfo.lub': 'tbl = {}\n',
+  })
+
+  const grf = openGrf(grfPath)
+  assert.equal(grf.version, 0x300)
+  assert.equal(grf.signature, 'Event Horizon')
+  assert.equal(grf.tableHeaderSize, 12) // 8 en 0x200
+  assert.equal(grf.entryLayout, '17 octets, offset 32 bits')
+  assert.equal(grf.entries.size, 3)
+  assert.equal(grf.read('data/mapnametable.txt').toString(), 'prontera.rsw#Prontera#\n')
+  assert.equal(grf.read('System/itemInfo.lub').toString(), 'tbl = {}\n')
+  grf.close()
+})
+
+test('GRF 0x300 : le client complet passe par la chaine d extraction', () => {
+  const dir = tmpdir()
+  makeFakeClient(dir)
+  // On rebascule l'archive du client de test en 0x300.
+  const files = readGrfEntries(path.join(dir, 'data.grf'))
+  writeGrf300(path.join(dir, 'data.grf'), files)
+
+  const vfs = openClient(dir)
+  assert.deepEqual(vfs.errors, [])
+  assert.equal(vfs.grfs[0].grf.version, 0x300)
+  assert.match(vfs.readText('data/mapnametable.txt'), /Prontera Field 8/)
+  assert.match(vfs.readText('System/itemInfo.lub'), /Red Potion/)
+  vfs.close()
 })

@@ -31,14 +31,37 @@ function looksZlib(buf, at) {
   return ((buf[at] << 8) | buf[at + 1]) % 31 === 0
 }
 
-function tryInflate(fd, offset, length) {
-  try {
-    const buf = Buffer.alloc(Math.min(length, 1 << 22))
-    fs.readSync(fd, buf, 0, buf.length, offset)
-    return zlib.inflateSync(buf)
-  } catch {
-    return null
+/**
+ * Cherche le debut reel du flux compresse autour de l'offset de table.
+ *
+ * En GRF 0x200 l'en-tete de table fait 8 octets ; les versions plus recentes
+ * en ajoutent. Plutot que de coder un decalage par version, on essaie les
+ * decalages plausibles avec les trois encapsulations courantes et on garde
+ * celui qui produit reellement des donnees.
+ */
+function findStream(fd, tableAt, fileSize) {
+  const window = Buffer.alloc(Math.min(1 << 20, fileSize - tableAt))
+  fs.readSync(fd, window, 0, window.length, tableAt)
+
+  const methods = [
+    ['zlib', (buf) => zlib.inflateSync(buf, { finishFlush: zlib.constants.Z_SYNC_FLUSH })],
+    ['deflate brut', (buf) => zlib.inflateRawSync(buf, { finishFlush: zlib.constants.Z_SYNC_FLUSH })],
+    ['gzip', (buf) => zlib.gunzipSync(buf, { finishFlush: zlib.constants.Z_SYNC_FLUSH })],
+  ]
+
+  for (let offset = 0; offset <= 32; offset += 4) {
+    for (const [method, decompress] of methods) {
+      // Un flux zlib s'annonce ; pour le deflate brut on tente quand meme.
+      if (method === 'zlib' && !looksZlib(window, offset)) continue
+      try {
+        const out = decompress(window.subarray(offset))
+        if (out.length > 64) return { start: tableAt + offset, method, out }
+      } catch {
+        // decalage ou methode incorrects : on passe au suivant
+      }
+    }
   }
+  return null
 }
 
 /** Une table des fichiers GRF valide : des noms ASCII suivis de 17 octets. */
@@ -103,46 +126,49 @@ function main() {
 
   const verdicts = []
   const plausibleOffset = tableOffset > 0 && HEADER_SIZE + tableOffset + 8 < stat.size
-  verdicts.push(['version 0x200', version === 0x200])
+  verdicts.push(['version connue (0x200 ou 0x300)', version === 0x200 || version === 0x300])
   verdicts.push(['offset de table dans le fichier', plausibleOffset])
   verdicts.push(['nombre de fichiers plausible', rawCount - seed - 7 > 0 && rawCount - seed - 7 < 2_000_000])
 
+  // La taille de l'en-tete de table depend de la version, et n'est pas
+  // documentee pour 0x300 : on l'etablit en essayant, plutot qu'en supposant.
   if (plausibleOffset) {
-    const sizes = Buffer.alloc(8)
-    fs.readSync(fd, sizes, 0, 8, HEADER_SIZE + tableOffset)
-    const packedLen = sizes.readUInt32LE(0)
-    const realLen = sizes.readUInt32LE(4)
-    console.log(`\nA l'offset de table : compresse=${packedLen}, decompresse=${realLen}`)
+    const tableAt = HEADER_SIZE + tableOffset
+    console.log('\nEn-tete de la table des fichiers (48 octets bruts)')
+    const raw = Buffer.alloc(Math.min(48, stat.size - tableAt))
+    fs.readSync(fd, raw, 0, raw.length, tableAt)
+    console.log(hexDump(raw, tableAt))
 
-    const at = HEADER_SIZE + tableOffset + 8
-    const probe = Buffer.alloc(2)
-    fs.readSync(fd, probe, 0, 2, at)
-    const zlibHere = looksZlib(probe, 0)
-    console.log(`  premiers octets : ${probe[0].toString(16).padStart(2, '0')} ${probe[1].toString(16).padStart(2, '0')}` +
-      `  -> ${zlibHere ? 'en-tete zlib valide' : 'PAS un en-tete zlib'}`)
-    verdicts.push(['flux zlib a l\'offset de table', zlibHere])
+    console.log('\n  Champs 32 bits successifs :')
+    for (let i = 0; i + 4 <= Math.min(24, raw.length); i += 4) {
+      const value = raw.readUInt32LE(i)
+      const asData = tableAt + i + 4 + value === stat.size ? '  <- flux jusqu\'a la fin du fichier si le flux commence ici' : ''
+      console.log(`    +${i.toString().padStart(2)} : ${value.toString().padStart(12)}${asData}`)
+    }
 
-    if (zlibHere) {
-      const table = tryInflate(fd, at, packedLen)
-      if (table) {
-        const { ok, sample } = looksLikeFileTable(table)
-        console.log(`  decompression   : ${table.length} octets (attendu ${realLen})`)
-        verdicts.push(['table decompressee', true])
-        verdicts.push(['table structuree comme un GRF', ok])
-        if (sample.length) {
-          console.log('\n  Premiers noms de fichiers :')
-          for (const name of sample) console.log(`    ${name}`)
-        }
-      } else {
-        console.log('  decompression   : ECHEC')
-        verdicts.push(['table decompressee', false])
+    const found = findStream(fd, tableAt, stat.size)
+    if (found) {
+      console.log(`\n  Flux trouve : debut a +${found.start - tableAt}, methode ${found.method}`)
+      console.log(`  Decompresse (echantillon) : ${found.out.length} octets`)
+      console.log('\n  Debut de la table decompressee')
+      console.log(hexDump(found.out.subarray(0, 256)))
+      verdicts.push([`flux de table lisible (+${found.start - tableAt}, ${found.method})`, true])
+
+      const { ok, sample } = looksLikeFileTable(found.out)
+      verdicts.push(['table structuree comme un GRF 0x200', ok])
+      if (sample.length) {
+        console.log('\n  Chaines lues comme des noms de fichiers :')
+        for (const name of sample) console.log(`    ${JSON.stringify(name)}`)
       }
+    } else {
+      console.log('\n  Aucun flux compresse lisible autour de l\'offset de table.')
+      verdicts.push(['flux de table lisible', false])
     }
   }
 
-  // Si l'offset declare ne mene nulle part, on cherche un flux zlib ailleurs :
-  // cela distingue "en-tete different" de "contenu chiffre".
-  if (!verdicts.find(([label]) => label === 'table decompressee')?.[1]) {
+  // Si rien n'a ete lu, on cherche un flux zlib ailleurs : cela distingue
+  // "en-tete different" de "contenu chiffre".
+  if (!verdicts.some(([label, ok]) => ok && label.startsWith('flux de table lisible'))) {
     console.log('\nRecherche d\'un flux zlib dans le premier Mo...')
     const scan = Buffer.alloc(Math.min(1 << 20, stat.size))
     fs.readSync(fd, scan, 0, scan.length, 0)
