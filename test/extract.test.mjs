@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { tmpdir, makeFakeClient, makeStringsOnlyClient } from './helpers.mjs'
+import { tmpdir, makeFakeClient, makeStringsOnlyClient, readGrfEntries, writeGrf } from './helpers.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -208,3 +208,33 @@ test('navigation reduite aux chaines : le mob est retrouve par son sprite', () =
   assert.equal(mobs['1002'].nameLocal, '포링')
   assert.ok(meta.warnings.some((w) => /nom non latin/.test(w)), meta.warnings.join(' | '))
 })
+
+test('la vraie base est trouvee meme derriere un talon au chemin attendu', () => {
+  // Cas Ragnarok Zero : System/itemInfo_true.lub existe mais ne fait que
+  // 162 octets, tandis que la base complete est ailleurs. S'arreter au premier
+  // chemin connu faisait manquer 3 Mo de donnees.
+  const client = makeFakeClient(tmpdir())
+
+  // On retire la table de l'archive pour ne laisser que le talon et la vraie
+  // base, comme sur le client reel.
+  const entries = readGrfEntries(path.join(client, 'data.grf'))
+  delete entries['System\\itemInfo.lub']
+  writeGrf(path.join(client, 'data.grf'), entries)
+
+  fs.mkdirSync(path.join(client, 'System'), { recursive: true })
+  fs.writeFileSync(path.join(client, 'System', 'itemInfo_true.lub'), Buffer.alloc(162))
+
+  const complete = fs.readFileSync(path.join(ROOT, 'test', 'fixtures', 'iteminfo_local.lub'))
+  const dir = path.join(client, 'data', 'luafiles514', 'lua files', 'datainfo')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'iteminfo.lub'), complete)
+
+  const out = path.join(tmpdir(), 'data')
+  const { items, meta } = runExtract(client, out)
+
+  assert.equal(items['2104'].name, 'Guard')
+  assert.equal(items['1202'].slots, 3)
+  assert.deepEqual(items['501'].desc, ['Une potion rouge.'])
+  assert.ok(meta.sources.some((s) => /datainfo[\\/]iteminfo\.lub/.test(s)), meta.sources.join(' | '))
+})
+

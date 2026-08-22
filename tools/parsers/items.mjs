@@ -115,24 +115,40 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
   const tried = []
   const attempts = []
 
-  const found = vfs.readAny(ITEM_INFO_CANDIDATES)
-  if (found) attempts.push({ path: found.path, buffer: found.buffer })
-
-  const read = (entry) => {
-    try { return vfs.read(entry.name) } catch { return null }
-  }
+  // Tous les chemins connus, pas seulement le premier : sur Ragnarok Zero,
+  // System/itemInfo_true.lub existe mais ne fait que 162 octets, et s'arreter
+  // la faisait manquer la vraie base, 3,3 Mo plus loin.
   const addAll = (entries) => {
     for (const entry of entries) {
-      if (attempts.some((a) => a.path === entry.name)) continue
-      const buffer = read(entry)
-      if (buffer) attempts.push({ path: entry.name, buffer, size: entry.size })
+      const name = entry.name ?? entry
+      if (attempts.some((a) => a.path === name)) continue
+      let buffer
+      try {
+        buffer = vfs.read(name)
+      } catch (err) {
+        // Une lecture qui echoue doit se voir : l'avaler en silence donnait un
+        // "aucune table reconnue" qui ne disait pas que le fichier existait.
+        tried.push({ path: name, score: 0, error: err.message })
+        continue
+      }
+      if (buffer) attempts.push({ path: name, buffer, size: entry.size })
     }
   }
+
+  addAll(ITEM_INFO_CANDIDATES)
   addAll(discoverItemFiles(vfs))
   addAll(discoverBigLuaFiles(vfs))
 
-  if (!attempts.length) {
+  // Le plus gros d'abord : une base d'items complete se reconnait a sa taille.
+  attempts.sort((a, b) => (b.size ?? b.buffer.length) - (a.size ?? a.buffer.length))
+
+  if (!attempts.length && !tried.length) {
     warnings.push(`Aucun fichier d'items trouve (cherche : ${ITEM_INFO_CANDIDATES.join(', ')})`)
+  } else if (!attempts.length) {
+    warnings.push(
+      `Aucun fichier d'items lisible. ` +
+      tried.map((t) => `${t.path} : ${t.error}`).join(' ; ')
+    )
   } else {
     let winner = null
     for (const attempt of attempts) {
@@ -258,15 +274,90 @@ function describeTables(env, tables) {
     (fields.length ? `, champs ${fields.join(', ')}.` : '.')
 }
 
+/** Plage ou vivent les identifiants d'items, toutes extensions confondues. */
+const ITEM_ID_MIN = 100
+const ITEM_ID_MAX = 100_000
+/** Sans champ reconnu, il faut beaucoup d'entrees pour conclure. */
+const MIN_INFERRED_ENTRIES = 50
+
+/**
+ * Reconnait une table d'items sans exiger des noms de champs precis.
+ *
+ * Deux formes existent : la table detaillee des clients classiques (id -> objet
+ * decrivant l'item) et la simple table de noms (id -> chaine), qui est parfois
+ * tout ce qu'un client embarque. Exiger `identifiedDisplayName` faisait passer
+ * la seconde pour rien du tout.
+ */
+export function analyzeItemTable(value) {
+  if (!value || typeof value !== 'object') return null
+  const entries = numericEntries(value).filter(([id]) => id >= ITEM_ID_MIN && id <= ITEM_ID_MAX)
+  if (entries.length < 2) return null
+
+  const objects = entries.filter(([, v]) => v && typeof v === 'object')
+  const strings = entries.filter(([, v]) => typeof v === 'string' && v.length > 0)
+
+  if (objects.length >= entries.length * 0.8) {
+    const named = objects.filter(([, v]) =>
+      v.identifiedDisplayName !== undefined || v.unidentifiedDisplayName !== undefined
+    ).length
+    // Des champs reconnus sont une preuve forte : deux entrees ne sont pas une
+    // coincidence. La forme seule est une preuve faible : il en faut beaucoup.
+    if (named >= 2) return { shape: 'objet', entries: objects, named, score: named * 10 }
+    if (objects.length >= MIN_INFERRED_ENTRIES) {
+      return { shape: 'objet', entries: objects, named: 0, score: objects.length }
+    }
+    return null
+  }
+
+  if (strings.length >= entries.length * 0.8 && strings.length >= MIN_INFERRED_ENTRIES) {
+    return { shape: 'noms', entries: strings, named: 0, score: strings.length }
+  }
+  return null
+}
+
+/**
+ * Quand les champs ne portent pas les noms attendus, on les reconnait a leurs
+ * valeurs : un nom est une chaine presente partout et presque toujours
+ * differente ; un nombre de slots est un petit entier ; une description est une
+ * liste de lignes.
+ */
+function inferFields(entries) {
+  const sample = entries.slice(0, 800)
+  const stats = new Map()
+  const note = (key, kind) => {
+    const s = stats.get(key) || { strings: 0, numbers: 0, lists: 0, distinct: new Set(), small: 0 }
+    s[kind]++
+    stats.set(key, s)
+    return s
+  }
+
+  for (const [, value] of sample) {
+    for (const [key, v] of Object.entries(value)) {
+      if (typeof v === 'string' && v) note(key, 'strings').distinct.add(v)
+      else if (typeof v === 'number') { const s = note(key, 'numbers'); if (v >= 0 && v <= 4) s.small++ }
+      else if (v && typeof v === 'object') {
+        const lines = toArray(v)
+        if (lines.length && lines.every((l) => typeof l === 'string')) note(key, 'lists')
+      }
+    }
+  }
+
+  const pickBy = (score) => [...stats.entries()]
+    .map(([key, s]) => ({ key, value: score(s) }))
+    .filter((c) => c.value > 0)
+    .sort((a, b) => b.value - a.value)[0]?.key
+
+  return {
+    name: pickBy((s) => (s.strings > sample.length * 0.5 ? s.distinct.size : 0)),
+    slots: pickBy((s) => (s.numbers > sample.length * 0.5 && s.small === s.numbers ? s.numbers : 0)),
+    desc: pickBy((s) => s.lists),
+  }
+}
+
 /** Une table est une table d'items si ses valeurs portent les bons champs. */
 function scoreItemTable(value) {
-  if (!value || typeof value !== 'object') return 0
-  const entries = numericEntries(value)
-  if (entries.length < 4) return 0
-  return entries.filter(([, v]) =>
-    v && typeof v === 'object' &&
-    (v.unidentifiedDisplayName !== undefined || v.identifiedDisplayName !== undefined)
-  ).length
+  const analyzed = analyzeItemTable(value)
+  return analyzed ? analyzed.score : 0
 }
 
 /**
@@ -280,17 +371,17 @@ function bestItemTable(tables) {
     const score = scoreItemTable(table)
     if (score > bestScore) { best = table; bestScore = score }
   }
-  return bestScore >= 4 ? best : null
+  return best
 }
 
 /** La table d'items s'appelle `tbl` dans kRO, mais pas dans tous les repacks. */
 function findItemTable(env) {
-  if (env.tbl && typeof env.tbl === 'object') return env.tbl
+  if (env.tbl && scoreItemTable(env.tbl) > 0) return env.tbl
   let best = null
   let bestScore = 0
   for (const value of Object.values(env)) {
     const score = scoreItemTable(value)
     if (score > bestScore) { best = value; bestScore = score }
   }
-  return bestScore >= 4 ? best : null
+  return best
 }

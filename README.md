@@ -108,10 +108,14 @@ data/ en clair ───────────────┘   (priorité com
 Trois points méritent d'être connus :
 
 **Le fichier d'items est cherché, pas supposé.** Sur Ragnarok Zero,
-`System/itemInfo_true.lub` ne fait que 162 octets : c'est un talon. L'extraction essaie donc
-les chemins connus, puis cherche les fichiers dont le nom évoque les items, du plus gros au
-plus petit — une base d'items pèse des centaines de kilo-octets, ce qui la place en tête — et
-retient celui dont la table contient le plus d'entrées reconnaissables.
+`System/itemInfo_true.lub` ne fait que 162 octets — un talon — tandis que la vraie base est
+`datainfo/iteminfo.lub`, 3,3 Mo. L'extraction essaie donc **tous** les chemins connus, puis
+les fichiers dont le nom évoque les items, puis les plus gros fichiers Lua du client, et
+traite les candidats du plus gros au plus petit. Une lecture qui échoue est signalée, jamais
+avalée. La table est reconnue sur deux niveaux de preuve : des champs connus
+(`identifiedDisplayName`…), ou, à défaut, la seule forme — beaucoup d'identifiants dans la
+plage des items associés à des objets ou à des chaînes, les champs étant alors identifiés
+par leurs valeurs.
 
 **Le bytecode Lua est exécuté, pas décompilé.** Les clients récents ne livrent plus une
 seule table en clair : `itemInfo`, `npcidentity`, `jobname`, toute la navigation sont du
@@ -185,7 +189,7 @@ pour caler le parseur sans deviner.
 ## Développement
 
 ```bash
-npm test          # 56 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
+npm test          # 57 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
 npm run build     # typecheck + build statique
 ```
 
