@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { openClient } from './vfs.mjs'
-import { isCompiledLua } from './lua.mjs'
+import { describeLua } from './luadata.mjs'
 import { looksUtf8, isAscii } from './encoding.mjs'
 
 /**
@@ -44,11 +44,12 @@ const PATTERNS = [
 ]
 
 function classify(buf) {
-  if (!buf) return 'absent'
-  if (isCompiledLua(buf)) return 'bytecode Lua compile'
-  if (isAscii(buf)) return 'texte (ascii)'
-  if (looksUtf8(buf)) return 'texte (utf-8)'
-  return 'texte (cp949 probable)'
+  if (!buf) return { note: 'absent', readable: false }
+  const described = describeLua(buf)
+  if (described.compiled) return described
+  if (isAscii(buf)) return { note: 'texte (ascii)', readable: true }
+  if (looksUtf8(buf)) return { note: 'texte (utf-8)', readable: true }
+  return { note: 'texte (cp949 probable)', readable: true }
 }
 
 function main() {
@@ -90,10 +91,10 @@ function main() {
   console.log('\nFichiers attendus')
   for (const [label, candidates] of KNOWN) {
     const found = candidates.find((c) => vfs.exists(c))
-    const kind = found ? classify(safeRead(vfs, found)) : 'absent'
-    report.known.push({ label, path: found || null, kind })
-    const mark = !found ? 'x' : kind.startsWith('bytecode') ? '!' : 'v'
-    console.log(`  [${mark}] ${label.padEnd(34)} ${found || '(introuvable)'}${found ? `  -> ${kind}` : ''}`)
+    const kind = found ? classify(safeRead(vfs, found)) : { note: 'absent', readable: false }
+    report.known.push({ label, path: found || null, kind: kind.note })
+    const mark = !found ? 'x' : kind.readable ? 'v' : '!'
+    console.log(`  [${mark}] ${label.padEnd(34)} ${found || '(introuvable)'}${found ? `  -> ${kind.note}` : ''}`)
   }
 
   console.log('\nGroupes de fichiers')
@@ -103,7 +104,7 @@ function main() {
     report.groups.push(group)
     console.log(`  ${label} : ${hits.length}`)
     for (const h of group.files) {
-      const kind = /\.(lub|lua)$/i.test(h.path) ? classify(safeRead(vfs, h.path)) : ''
+      const kind = /\.(lub|lua)$/i.test(h.path) ? classify(safeRead(vfs, h.path)).note : ''
       console.log(`      ${h.path}${kind ? `  -> ${kind}` : ''}`)
     }
     if (!full && hits.length > group.files.length) console.log(`      ... et ${hits.length - group.files.length} autres (--full pour tout voir)`)
@@ -123,7 +124,8 @@ function main() {
   vfs.close()
 
   console.log('\nRapport ecrit dans scan-report.json.')
-  console.log('Les lignes [!] sont du Lua compile : leur contenu n\'est pas lisible tel quel.')
+  console.log('Le bytecode Lua 5.1 est execute a l\'extraction : marque [v], il est exploitable.')
+  console.log('Les lignes [!] sont ce que l\'extraction ne sait pas lire.')
 }
 
 /** Repartition par extension du dossier data/ en clair. */

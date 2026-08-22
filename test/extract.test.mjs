@@ -73,21 +73,43 @@ test('extraction complete sur un client synthetique', () => {
   assert.deepEqual(meta.archives, ['data.grf'])
 })
 
-test('itemInfo compile : on retombe sur les tables texte, avec un avertissement', () => {
+test('itemInfo compile : le bytecode est execute, pas contourne', () => {
   const client = makeFakeClient(tmpdir())
-  // System/ vit a la racine du client, pas sous data/ : c'est ce fichier-la
-  // que le client lit en priorite, et il est compile dans les clients officiels.
+  // Les clients officiels recents ne livrent plus que du bytecode, et plus
+  // aucune table texte : on ecrase donc les deux.
   fs.mkdirSync(path.join(client, 'System'), { recursive: true })
-  const bytecode = Buffer.concat([Buffer.from([0x1b, 0x4c, 0x75, 0x61, 0x51]), Buffer.alloc(64)])
-  fs.writeFileSync(path.join(client, 'System', 'itemInfo.lub'), bytecode)
+  fs.copyFileSync(
+    path.join(ROOT, 'test', 'fixtures', 'iteminfo.lub'),
+    path.join(client, 'System', 'itemInfo.lub')
+  )
 
   const out = path.join(tmpdir(), 'data')
   const { items, meta } = runExtract(client, out)
 
-  // itemInfo.lub compile est ignore, mais idnum2itemdisplaynametable.txt reste.
   assert.equal(items['501'].name, 'Red Potion')
-  assert.equal(items['909'].name, 'Jellopy')
-  assert.ok(meta.warnings.some((w) => /bytecode Lua compile/.test(w)))
+  assert.equal(items['501'].res, 'red_potion')
+  assert.deepEqual(items['501'].desc, [
+    'Une potion rouge qui rend',
+    '^0000FF45^000000 points de vie.',
+  ])
+  assert.equal(items['1202'].slots, 3)
+  assert.ok(!meta.warnings.some((w) => /bytecode/.test(w)), meta.warnings.join(' | '))
+  assert.ok(meta.sources.some((src) => /itemInfo\.lub/.test(src)))
+})
+
+test('bytecode corrompu : avertissement, et le reste de l extraction tient', () => {
+  const client = makeFakeClient(tmpdir())
+  fs.mkdirSync(path.join(client, 'System'), { recursive: true })
+  const truncated = fs.readFileSync(path.join(ROOT, 'test', 'fixtures', 'iteminfo.lub')).subarray(0, 60)
+  fs.writeFileSync(path.join(client, 'System', 'itemInfo.lub'), truncated)
+
+  const out = path.join(tmpdir(), 'data')
+  const { items, mobs, meta } = runExtract(client, out)
+
+  // itemInfo est perdu, mais les tables texte du client de test prennent le relais
+  assert.equal(items['501'].name, 'Red Potion')
+  assert.equal(mobs['1002'].name, 'Poring')
+  assert.ok(meta.warnings.some((w) => /tronque/.test(w)), meta.warnings.join(' | '))
 })
 
 test('client sans fichier de navigation : extraction partielle, pas d echec', () => {

@@ -1,5 +1,5 @@
-import { decode } from '../encoding.mjs'
-import { parseLua, isCompiledLua, numericEntries } from '../lua.mjs'
+import { numericEntries } from '../lua.mjs'
+import { loadLua } from '../luadata.mjs'
 
 /**
  * Mobs.
@@ -36,12 +36,9 @@ export function looksLikeMobId(id) {
 function readLua(vfs, candidates, encoding, warnings, env) {
   const found = vfs.readAny(candidates)
   if (!found) return null
-  if (isCompiledLua(found.buffer)) {
-    warnings.push(`${found.path} est du bytecode Lua compile : ignore.`)
-    return null
-  }
   try {
-    const result = parseLua(decode(found.buffer, encoding), { env })
+    const result = loadLua(found.buffer, { encoding, env })
+    for (const w of result.warnings) warnings.push(`${found.path} : ${w}`)
     return { path: found.path, env: result.env }
   } catch (err) {
     warnings.push(`${found.path} : ${err.message}`)
@@ -131,8 +128,8 @@ export function extractMobs(vfs, { encoding = 'auto' } = {}) {
 
   if (!mobs.size) {
     warnings.push(
-      'Aucun mob identifie dans le client. Les fichiers datainfo sont probablement compiles : ' +
-      'les noms viendront alors uniquement des fichiers de navigation.'
+      'Aucun mob identifie depuis datainfo : les noms viendront uniquement des ' +
+      'fichiers de navigation.'
     )
   }
 

@@ -1,5 +1,5 @@
-import { decode } from '../encoding.mjs'
-import { parseLua, isCompiledLua, toArray } from '../lua.mjs'
+import { toArray } from '../lua.mjs'
+import { loadLua } from '../luadata.mjs'
 
 /**
  * Fichiers de navigation (data/luafiles514/lua files/navigation/navi_mob_*.lub).
@@ -176,13 +176,11 @@ export function extractSpawns(vfs, { encoding = 'auto', knownMaps = new Set(), k
   for (const file of files) {
     const buf = vfs.read(file)
     if (!buf) continue
-    if (isCompiledLua(buf)) {
-      warnings.push(`${file} est du bytecode Lua compile : decompile-le pour recuperer les spawns.`)
-      continue
-    }
     let env
     try {
-      env = parseLua(decode(buf, encoding)).env
+      const result = loadLua(buf, { encoding })
+      for (const w of result.warnings) warnings.push(`${file} : ${w}`)
+      env = result.env
     } catch (err) {
       warnings.push(`${file} : ${err.message}`)
       continue

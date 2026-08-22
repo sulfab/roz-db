@@ -82,7 +82,16 @@ data/ en clair ───────────────┘   (priorité com
                                                       └─ tables.mjs tables texte du client
 ```
 
-Deux points méritent d'être connus :
+Trois points méritent d'être connus :
+
+**Le bytecode Lua est exécuté, pas décompilé.** Les clients récents ne livrent plus une
+seule table en clair : `itemInfo`, `npcidentity`, `jobname`, toute la navigation sont du
+bytecode Lua 5.1. Décompiler redonnerait du source qu'il faudrait reparser ; `luac.mjs`
+va plus court en *exécutant* le chunk dans une petite machine virtuelle et en récupérant
+les globales qu'il a définies — ces fichiers sont de la donnée, ils construisent des tables
+et s'arrêtent. Les fonctions attendues du client (`main()` appelle `AddItem`) sont absentes :
+elles sont notées et ignorées, la table est déjà construite. `luadata.mjs` masque la
+différence, les parseurs ne savent pas s'ils lisent du source ou du bytecode.
 
 **Le VFS respecte la priorité du client.** Un fichier en clair dans `data/` prime sur les
 archives, et l'ordre des `.grf` suit `DATA.INI`. Sans ça on lirait des données périmées là
@@ -96,11 +105,6 @@ et sa confiance sont affichés dans l'écran **Données** de l'app — c'est là
 regarder si un chiffre paraît faux.
 
 ## Quand ça coince
-
-**`[!] bytecode Lua compilé`** — les clients officiels livrent souvent `itemInfo.lub`
-compilé. L'extraction retombe alors sur les tables texte de `data/` (noms, slots,
-descriptions), ce qui couvre l'essentiel. Pour le reste, décompile le fichier (`unluac`,
-`luadec`) et dépose le résultat en clair dans `data/` : il sera repris automatiquement.
 
 **Archive refusée** — le client Ragnarok Zero s'écarte du GRF classique sur deux points :
 la signature annonce `Event Horizon` au lieu de `Master of Magic`, et la version est `0x300`
@@ -123,12 +127,15 @@ coréens, UTF-8 des repacks). En cas de doute : `npm run extract -- --encoding c
 ## Développement
 
 ```bash
-npm test          # 32 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
+npm test          # 42 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
 npm run build     # typecheck + build statique
 ```
 
-Les tests fabriquent un vrai client synthétique (archive GRF valide, `.lub`, tables texte)
-et font tourner toute la chaîne dessus : rien n'exige d'avoir le client sous la main.
+Les tests fabriquent un vrai client synthétique (archive GRF valide en 0x200 et 0x300,
+tables texte) et font tourner toute la chaîne dessus : rien n'exige d'avoir le client sous
+la main. Les fixtures de bytecode (`test/fixtures/*.lub`) sont produites par le vrai
+`luac 5.1`, leurs sources `.lua` sont à côté — tester la VM contre un bytecode que j'aurais
+assemblé moi-même n'aurait rien prouvé.
 
 ### Structure
 
@@ -136,7 +143,9 @@ et font tourner toute la chaîne dessus : rien n'exige d'avoir le client sous la
 tools/          chaîne d'extraction (Node, sans build)
   grf.mjs       lecteur d'archives GRF (0x200 et 0x300)
   vfs.mjs       data/ en clair + archives, dans l'ordre du client
-  lua.mjs       parseur Lua tolérant (les .lub sont du Lua)
+  lua.mjs       parseur Lua tolérant (fichiers .lub en clair)
+  luac.mjs      désassemblage + VM Lua 5.1 (fichiers .lub compilés)
+  luadata.mjs   point d'entrée unique : source ou bytecode, même résultat
   parsers/      items, mobs, navigation, tables texte
   extract.mjs   orchestration → public/data/*.json
   scan.mjs      inventaire du client

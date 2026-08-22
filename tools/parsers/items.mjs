@@ -1,5 +1,6 @@
 import { decode } from '../encoding.mjs'
-import { parseLua, isCompiledLua, toArray, numericEntries } from '../lua.mjs'
+import { toArray, numericEntries } from '../lua.mjs'
+import { loadLua } from '../luadata.mjs'
 import { parseSimpleTable, parseDescTable } from './tables.mjs'
 
 /**
@@ -7,9 +8,10 @@ import { parseSimpleTable, parseDescTable } from './tables.mjs'
  *
  * Deux sources dans le client, complementaires :
  *  - System/itemInfo*.lub : la table complete (nom identifie/non identifie,
- *    description, nombre de slots, ClassNum pour l'icone). Souvent compilee.
- *  - data/*table.txt      : les memes donnees eclatees en tables texte, toujours
- *    lisibles. C'est le filet de securite quand le .lub est du bytecode.
+ *    description, nombre de slots, ClassNum pour l'icone). Compilee dans les
+ *    clients recents, ce qui ne pose plus de probleme : voir luadata.mjs.
+ *  - data/*table.txt      : les memes donnees eclatees en tables texte. Les
+ *    clients recents ne les livrent plus, les anciens si.
  */
 
 const ITEM_INFO_CANDIDATES = [
@@ -76,15 +78,9 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
   const found = vfs.readAny(ITEM_INFO_CANDIDATES)
   if (!found) {
     warnings.push(`Aucun itemInfo trouve (cherche : ${ITEM_INFO_CANDIDATES.join(', ')})`)
-  } else if (isCompiledLua(found.buffer)) {
-    warnings.push(
-      `${found.path} est du bytecode Lua compile : on retombe sur les tables texte. ` +
-      `Pour recuperer les descriptions completes, decompile-le ` +
-      `(unluac / luadec) et depose le resultat en clair dans data/.`
-    )
   } else {
     try {
-      const { env, warnings: luaWarnings } = parseLua(decode(found.buffer, encoding))
+      const { env, warnings: luaWarnings } = loadLua(found.buffer, { encoding })
       const table = findItemTable(env)
       if (!table) {
         warnings.push(`${found.path} : aucune table d'items reconnue`)
@@ -108,9 +104,7 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
           if (descUnid.length) item.descUnid = descUnid
         }
         sources.push(found.path)
-        if (luaWarnings.length) {
-          warnings.push(`${found.path} : ${luaWarnings.length} fragment(s) ignore(s) par le parseur Lua`)
-        }
+        for (const w of luaWarnings) warnings.push(`${found.path} : ${w}`)
       }
     } catch (err) {
       warnings.push(`${found.path} : ${err.message}`)
