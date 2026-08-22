@@ -2,6 +2,7 @@ import { decode } from '../encoding.mjs'
 import { toArray, numericEntries } from '../lua.mjs'
 import { loadLua } from '../luadata.mjs'
 import { parseSimpleTable, parseDescTable } from './tables.mjs'
+import { readableRatio } from '../text.mjs'
 
 /**
  * Items.
@@ -44,11 +45,24 @@ function bySizeDesc(a, b) { return b.size - a.size }
  * client ou le nom attendu n'existe pas, la base d'items reste de loin le plus
  * gros fichier de donnees, quel que soit son nom.
  */
-function discoverItemFiles(vfs) {
+/**
+ * Les fichiers de donnees existent souvent en plusieurs langues, suffixees
+ * (_frfr, _enus, _kokr). La version sans suffixe est celle d'origine, en
+ * coreen : on essaie donc d'abord la langue demandee, puis l'anglais.
+ */
+function languageRank(name, language) {
+  const lower = name.toLowerCase()
+  if (lower.includes(`_${language}.`)) return 0
+  if (lower.includes('_enus.')) return 1
+  if (!/_[a-z]{4}\./.test(lower)) return 2 // sans suffixe : l'original
+  return 3                                  // une autre langue
+}
+
+function discoverItemFiles(vfs, language) {
   return vfs
     .list((key) => /item.*\.(lub|lua)$/.test(key) && !/table\.txt$/.test(key))
     .filter((entry) => entry.size >= DISCOVERY_MIN_SIZE)
-    .sort(bySizeDesc)
+    .sort((a, b) => languageRank(a.name, language) - languageRank(b.name, language) || bySizeDesc(a, b))
     .slice(0, DISCOVERY_LIMIT)
 }
 
@@ -99,7 +113,7 @@ function textLines(value) {
  * @param {{encoding?: string}} options
  * @returns {{items: Map<number, object>, sources: string[], warnings: string[]}}
  */
-export function extractItems(vfs, { encoding = 'auto' } = {}) {
+export function extractItems(vfs, { encoding = 'auto', language = 'frfr' } = {}) {
   /** @type {Map<number, object>} */
   const items = new Map()
   const sources = []
@@ -144,11 +158,14 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
   }
 
   addAll(ITEM_INFO_CANDIDATES)
-  addAll(discoverItemFiles(vfs))
+  addAll(discoverItemFiles(vfs, language))
   addAll(discoverBigLuaFiles(vfs))
 
-  // Le plus gros d'abord : une base d'items complete se reconnait a sa taille.
-  attempts.sort((a, b) => b.size - a.size)
+  // La langue demandee d'abord, puis la taille : une base d'items complete se
+  // reconnait a son poids, mais un fichier coreen de 3 Mo vaut moins qu'une
+  // variante lisible.
+  attempts.sort((a, b) =>
+    languageRank(a.path, language) - languageRank(b.path, language) || b.size - a.size)
 
   if (!attempts.length && !tried.length) {
     warnings.push(`Aucun fichier d'items trouve (cherche : ${ITEM_INFO_CANDIDATES.join(', ')})`)
@@ -167,16 +184,20 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
         })
         const table = findItemTable(env) || bestItemTable(tables)
         const score = table ? scoreItemTable(table) : 0
-        tried.push({ path: attempt.path, score, env, tables, luaWarnings, size: attempt.size })
-        if (table && (!winner || score > winner.score)) {
-          winner = { path: attempt.path, table, score, luaWarnings }
+        const readable = table ? tableReadability(table) : 0
+        tried.push({ path: attempt.path, score, readable, env, tables, luaWarnings, size: attempt.size })
+
+        // Un libelle qu'on ne peut pas lire ne sert a rien : une table lisible
+        // passe devant une table plus fournie mais en coreen.
+        if (table && (!winner || betterCandidate({ score, readable }, winner))) {
+          winner = { path: attempt.path, table, score, readable, luaWarnings }
         }
       } catch (err) {
-        tried.push({ path: attempt.path, score: 0, error: err.message, size: attempt.size })
+        tried.push({ path: attempt.path, score: 0, readable: 0, error: err.message, size: attempt.size })
       }
-      // Une base d'items complete se reconnait tout de suite : inutile de
-      // continuer a executer des fichiers une fois qu'on la tient.
-      if (winner && winner.score >= 100) break
+      // Inutile de continuer a executer des fichiers de plusieurs mega-octets
+      // une fois qu'on tient une base complete et lisible.
+      if (winner && winner.score >= 100 && winner.readable >= READABLE_ENOUGH) break
     }
 
     // Les candidats sont traites du plus gros au plus petit : ceux qui
@@ -256,6 +277,18 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
 
       sources.push(source)
       for (const w of luaWarnings || []) warnings.push(`${source} : ${w}`)
+
+      if (winner.readable < READABLE_ENOUGH) {
+        const others = tried
+          .filter((t) => t.score > 0 && t.path !== source)
+          .map((t) => t.path)
+        warnings.push(
+          `${source} : les libelles sont en alphabet non latin. C'est le fichier ` +
+          `d'origine du client ; cherche une variante localisee avec ` +
+          `\`npm run find -- iteminfo\` puis relance avec --language <code>.` +
+          (others.length ? ` Autres tables lisibles trouvees : ${others.slice(0, 3).join(', ')}.` : '')
+        )
+      }
     }
   }
 
@@ -417,6 +450,30 @@ export function analyzeItemTable(value) {
     return { shape: 'noms', entries: strings, named: 0, score: strings.length }
   }
   return null
+}
+
+/** En deca, les libelles sont majoritairement illisibles pour un francophone. */
+const READABLE_ENOUGH = 0.5
+
+/** Part de libelles en alphabet latin dans une table d'items. */
+function tableReadability(table) {
+  const analyzed = analyzeItemTable(table)
+  if (!analyzed) return 0
+  if (analyzed.shape === 'noms') return readableRatio(analyzed.entries.map(([, v]) => v))
+  const field = analyzed.named
+    ? (analyzed.entries.find(([, v]) => v.identifiedDisplayName)?.[1].identifiedDisplayName !== undefined
+        ? 'identifiedDisplayName' : 'unidentifiedDisplayName')
+    : analyzed.fields?.name
+  if (!field) return 0
+  return readableRatio(analyzed.entries.map(([, v]) => v[field]))
+}
+
+/** Lisible d'abord, fourni ensuite. */
+function betterCandidate(candidate, current) {
+  const a = candidate.readable >= READABLE_ENOUGH ? 1 : 0
+  const b = current.readable >= READABLE_ENOUGH ? 1 : 0
+  if (a !== b) return a > b
+  return candidate.score > current.score
 }
 
 /** Une table est une table d'items si ses valeurs portent les bons champs. */

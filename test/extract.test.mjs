@@ -299,3 +299,51 @@ test('un candidat plus gros ecarte est signale, pas passe sous silence', () => {
   assert.match(notice, /iteminfo\.lub/)
   assert.match(notice, /293 ko/)
 })
+
+test('libelles illisibles : une variante localisee passe devant, meme plus petite', () => {
+  const client = makeFakeClient(tmpdir())
+  const entries = readGrfEntries(path.join(client, 'data.grf'))
+  delete entries['System\\itemInfo.lub']
+  for (const key of Object.keys(entries)) {
+    if (/idnum2item|itemslotcount/i.test(key)) delete entries[key]
+  }
+  writeGrf(path.join(client, 'data.grf'), entries)
+
+  const dir = path.join(client, 'data', 'luafiles514', 'lua files', 'datainfo')
+  fs.mkdirSync(dir, { recursive: true })
+  const fixture = (name) => path.join(ROOT, 'test', 'fixtures', name)
+  // L'original coreen est le plus gros : c'est lui qui gagnerait au poids seul.
+  fs.copyFileSync(fixture('iteminfo_kokr.lub'), path.join(dir, 'iteminfo.lub'))
+  fs.copyFileSync(fixture('iteminfo_frfr.lub'), path.join(dir, 'iteminfo_frfr.lub'))
+
+  const out = path.join(tmpdir(), 'data')
+  const { items, meta } = runExtract(client, out)
+
+  assert.equal(items['501'].name, 'Potion 1')
+  assert.deepEqual(items['501'].desc, ['Une potion.'])
+  assert.ok(meta.sources.some((s) => /iteminfo_frfr/.test(s)), meta.sources.join(' | '))
+  assert.ok(!meta.warnings.some((w) => /alphabet non latin/.test(w)), meta.warnings.join(' | '))
+})
+
+test('aucune variante lisible : on le dit, au lieu d afficher du coreen sans prevenir', () => {
+  const client = makeFakeClient(tmpdir())
+  const entries = readGrfEntries(path.join(client, 'data.grf'))
+  delete entries['System\\itemInfo.lub']
+  for (const key of Object.keys(entries)) {
+    if (/idnum2item|itemslotcount/i.test(key)) delete entries[key]
+  }
+  writeGrf(path.join(client, 'data.grf'), entries)
+
+  const dir = path.join(client, 'data', 'luafiles514', 'lua files', 'datainfo')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.copyFileSync(
+    path.join(ROOT, 'test', 'fixtures', 'iteminfo_kokr.lub'),
+    path.join(dir, 'iteminfo.lub')
+  )
+
+  const out = path.join(tmpdir(), 'data')
+  const { items, meta } = runExtract(client, out)
+
+  assert.match(items['501'].name, /고밀도/)
+  assert.ok(meta.warnings.some((w) => /alphabet non latin/.test(w)), meta.warnings.join(' | '))
+})

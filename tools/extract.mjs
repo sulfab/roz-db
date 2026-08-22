@@ -9,6 +9,7 @@ import { extractMobs, prettifySprite } from './parsers/mobs.mjs'
 import { extractSpawns } from './parsers/navi.mjs'
 
 import { resolveClientDir, ROOT } from './client-path.mjs'
+import { isReadableName } from './text.mjs'
 
 function parseArgs(argv) {
   const args = { out: path.join(ROOT, 'public', 'data'), encoding: 'auto', language: 'frfr' }
@@ -35,22 +36,10 @@ Options
                            memorise dans .client-path pour les fois suivantes
   -o, --out <dossier>      sortie JSON            (defaut : public/data)
   -e, --encoding <enc>     auto | cp949 | utf8 | cp1252   (defaut : auto)
-  -l, --language <code>    langue des noms de mobs dans les fichiers de
-                           navigation : frfr, enus, kokr...  (defaut : frfr)
+  -l, --language <code>    langue preferee pour les noms d'items et de mobs :
+                           frfr, enus, kokr...               (defaut : frfr)
   -v, --verbose            detaille les archives lues
 `
-
-/**
- * Les fichiers de navigation portent le nom du monstre dans la langue du
- * fichier — souvent du coreen, meme dans les variantes localisees. Un nom
- * illisible n'aide personne : on lui prefere alors le sprite mis en forme,
- * en conservant le nom d'origine pour la recherche.
- */
-const CJK = /[\u1100-\u11ff\u2e80-\u9fff\ua960-\ua97f\uac00-\ud7ff\uf900-\ufaff]/
-
-function isReadableName(name) {
-  return typeof name === 'string' && name.length > 0 && !CJK.test(name)
-}
 
 function extractMapNames(vfs, encoding) {
   const buf = vfs.read('data/mapnametable.txt')
@@ -95,7 +84,7 @@ async function main() {
   else warnings.push('data/mapnametable.txt absent : les cartes n\'auront pas de nom lisible.')
 
   // --- items --------------------------------------------------------------
-  const itemResult = extractItems(vfs, { encoding: args.encoding })
+  const itemResult = extractItems(vfs, { encoding: args.encoding, language: args.language })
   sources.push(...itemResult.sources)
   warnings.push(...itemResult.warnings)
 

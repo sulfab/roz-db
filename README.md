@@ -153,6 +153,13 @@ lignes dont le sprite est inconnu sont comptées et signalées, jamais perdues e
 Quand la population n'est pas dans le client, l'app affiche **présent** et non un nombre :
 inventer un `1` le ferait passer pour une mesure.
 
+**La langue prime sur la taille.** Les fichiers de données existent souvent en plusieurs
+langues, suffixées (`_frfr`, `_enus`, `_kokr`) ; la version sans suffixe est l'originale, en
+coréen. Pour les items comme pour les mobs, l'extraction essaie d'abord la langue demandée
+(`--language`, `frfr` par défaut), puis l'anglais. Et elle mesure la part de libellés en
+alphabet latin : une table lisible passe devant une table plus fournie mais illisible. Quand
+aucune variante lisible n'existe, c'est dit — pas affiché en silence.
+
 **Le nom affiché est celui qu'on peut lire.** Les fichiers de langue contiennent souvent des
 noms coréens, y compris dans la variante `frfr`. Un nom non latin est alors remplacé par le
 sprite mis en forme (`DRAINLIAR` → `Drainliar`), le nom d'origine restant disponible et
@@ -205,7 +212,7 @@ pour caler le parseur sans deviner.
 ## Développement
 
 ```bash
-npm test          # 67 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
+npm test          # 69 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
 npm run build     # typecheck + build statique
 ```
 
@@ -222,6 +229,7 @@ assemblé moi-même n'aurait rien prouvé. Même principe pour `test/fixtures/ca
 tools/          chaîne d'extraction (Node, sans build)
   grf.mjs       lecteur d'archives GRF (0x200 et 0x300)
   des.mjs       déchiffrement des entrées chiffrées d'une archive
+  text.mjs      lisibilité des libellés (alphabet latin ou non)
   vfs.mjs       data/ en clair + archives, dans l'ordre du client
   lua.mjs       parseur Lua tolérant (fichiers .lub en clair)
   luac.mjs      désassemblage + VM Lua 5.1 (fichiers .lub compilés)
