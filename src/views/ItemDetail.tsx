@@ -1,6 +1,6 @@
 import type { Db } from '../data'
 import { farmSpots, formatOdds } from '../data'
-import { ColorText, ItemIcon, MobLink, MapLink, Chance, Section, Empty, usePaged, MoreButton } from '../ui'
+import { ColorText, ItemIcon, MobLink, MapLink, Chance, Section, Empty, usePaged, MoreButton, Population } from '../ui'
 import { href } from '../router'
 
 /**
@@ -83,7 +83,7 @@ export function ItemDetail({ db, id }: { db: Db; id: number }) {
                     {spot.map ? (
                       <>
                         <MapLink map={spot.map} />
-                        <span className="amount">×{spot.amount}</span>
+                        {spot.amount !== null && <span className="amount">×{spot.amount}</span>}
                       </>
                     ) : (
                       <span className="muted">aucune zone connue</span>
@@ -112,7 +112,7 @@ export function ItemDetail({ db, id }: { db: Db; id: number }) {
                 <tr key={`${spot.mob.id}-${spot.map?.id}-${i}`}>
                   <td><MapLink map={spot.map} /></td>
                   <td><MobLink mob={spot.mob} /></td>
-                  <td className="num">{spot.amount}</td>
+                  <td className="num"><Population amount={spot.amount} /></td>
                   <td className="num"><Chance value={spot.chance} /></td>
                 </tr>
               ))}

@@ -86,7 +86,11 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
       })
       const table = findItemTable(env) || bestItemTable(tables)
       if (!table) {
-        warnings.push(`${found.path} : aucune table d'items reconnue`)
+        warnings.push(
+          `${found.path} : aucune table d'items reconnue. ` +
+          describeTables(env, tables) +
+          ` Lance \`npm run dump -- "${found.path}"\` et envoie la sortie.`
+        )
       } else {
         for (const [id, entry] of numericEntries(table)) {
           if (!entry || typeof entry !== 'object') continue
@@ -160,6 +164,24 @@ export function extractItems(vfs, { encoding = 'auto' } = {}) {
 
   if (!items.size) warnings.push('Aucun item extrait : verifie le chemin du client et l\'encodage.')
   return { items, sources, warnings }
+}
+
+/**
+ * Quand rien n'est reconnu, dire ce qui a ete vu vaut mieux qu'un constat
+ * d'echec : les noms de champs suffisent generalement a caler le parseur.
+ */
+function describeTables(env, tables) {
+  const globals = Object.keys(env).filter((k) => env[k] && typeof env[k] === 'object')
+  const biggest = tables
+    .filter((t) => t && typeof t === 'object')
+    .sort((a, b) => Object.keys(b).length - Object.keys(a).length)[0]
+  const fields = biggest
+    ? [...new Set(Object.values(biggest).flatMap((v) =>
+        v && typeof v === 'object' ? Object.keys(v).filter((k) => !/^-?\d+$/.test(k)) : []))].slice(0, 12)
+    : []
+  return `Globales : ${globals.join(', ') || 'aucune'}.` +
+    (biggest ? ` Plus grosse table : ${Object.keys(biggest).length} cles` : '') +
+    (fields.length ? `, champs ${fields.join(', ')}.` : '.')
 }
 
 /** Une table est une table d'items si ses valeurs portent les bons champs. */

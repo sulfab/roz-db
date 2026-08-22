@@ -18,6 +18,8 @@ export interface Db {
   /** itemId -> mobs qui le droppent, tri par taux decroissant */
   dropsByItem: Map<number, DropSource[]>
   hasDrops: boolean
+  /** false quand la navigation ne donne que la presence, sans nombre. */
+  hasPopulations: boolean
   itemList: Item[]
   mobList: Mob[]
   mapList: GameMap[]
@@ -94,6 +96,7 @@ export async function loadDb(): Promise<Db> {
     items, mobs, maps, drops, meta,
     dropsByMob, dropsByItem,
     hasDrops: dropsByMob.size > 0,
+    hasPopulations: meta?.hasPopulations !== false,
     itemList, mobList, mapList,
   }
 }
@@ -135,7 +138,11 @@ export function search(db: Db, query: string, limit = 50): Hit[] {
     if (s) hits.push({ kind: 'item', item, score: s })
   }
   for (const mob of db.mobList) {
-    const s = Math.max(score(normalize(mob.name), needle), mob.sprite ? score(normalize(mob.sprite), needle) * 0.5 : 0)
+    const s = Math.max(
+      score(normalize(mob.name), needle),
+      mob.nameLocal ? score(mob.nameLocal.toLowerCase(), needle) : 0,
+      mob.sprite ? score(normalize(mob.sprite), needle) * 0.5 : 0
+    )
     if (s) hits.push({ kind: 'mob', mob, score: s })
   }
   for (const map of db.mapList) {
@@ -153,7 +160,7 @@ export interface FarmSpot {
   mob: Mob
   chance: number
   map: GameMap | null
-  amount: number
+  amount: number | null
 }
 
 export function farmSpots(db: Db, itemId: number): FarmSpot[] {
@@ -174,7 +181,7 @@ export function farmSpots(db: Db, itemId: number): FarmSpot[] {
     }
   }
   // Le taux prime ; a taux egal, la carte la plus peuplee.
-  return spots.sort((a, b) => b.chance - a.chance || b.amount - a.amount)
+  return spots.sort((a, b) => b.chance - a.chance || (b.amount ?? 0) - (a.amount ?? 0))
 }
 
 /** Tout ce qui tombe sur une carte donnee, agrege par item. */

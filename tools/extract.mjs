@@ -40,6 +40,18 @@ Options
   -v, --verbose            detaille les archives lues
 `
 
+/**
+ * Les fichiers de navigation portent le nom du monstre dans la langue du
+ * fichier — souvent du coreen, meme dans les variantes localisees. Un nom
+ * illisible n'aide personne : on lui prefere alors le sprite mis en forme,
+ * en conservant le nom d'origine pour la recherche.
+ */
+const CJK = /[\u1100-\u11ff\u2e80-\u9fff\ua960-\ua97f\uac00-\ud7ff\uf900-\ufaff]/
+
+function isReadableName(name) {
+  return typeof name === 'string' && name.length > 0 && !CJK.test(name)
+}
+
 function extractMapNames(vfs, encoding) {
   const buf = vfs.read('data/mapnametable.txt')
   if (!buf) return { names: new Map(), source: null }
@@ -93,11 +105,19 @@ async function main() {
   warnings.push(...mobResult.warnings)
 
   // --- spawns -------------------------------------------------------------
+  // Le sprite est la cle de jointure quand les fichiers de navigation ne
+  // portent pas d'identifiant de mob.
+  const spriteToId = new Map()
+  for (const mob of mobResult.mobs.values()) {
+    if (mob.sprite) spriteToId.set(mob.sprite.toUpperCase(), mob.id)
+  }
+
   const spawnResult = extractSpawns(vfs, {
     encoding: args.encoding,
     language: args.language,
     knownMaps: new Set(mapNames.keys()),
     knownMobIds: new Set(mobResult.mobs.keys()),
+    knownSprites: spriteToId,
   })
   sources.push(...spawnResult.files)
   warnings.push(...spawnResult.warnings)
@@ -121,12 +141,21 @@ async function main() {
       mob = { id: spawn.mobId, name: spawn.name || `Mob ${spawn.mobId}`, nameSource: 'navi' }
       mobs.set(spawn.mobId, mob)
     }
-    // Le nom du fichier de navigation est localise : il prime sur le sprite.
-    if (spawn.name && mob.nameSource !== 'navi') { mob.name = spawn.name; mob.nameSource = 'navi' }
+    // Le nom du fichier de navigation prime sur le sprite, a condition d'etre
+    // lisible : sinon on garde le sprite et on range le nom local a cote.
+    if (spawn.name && mob.nameSource !== 'navi') {
+      if (isReadableName(spawn.name)) { mob.name = spawn.name; mob.nameSource = 'navi' }
+      else if (!mob.nameLocal) mob.nameLocal = spawn.name
+    }
     if (spawn.level !== undefined && mob.level === undefined) mob.level = spawn.level
 
     const key = `${spawn.mobId}@${spawn.map}`
-    spawnIndex.set(key, (spawnIndex.get(key) || 0) + (spawn.amount || 1))
+    const previous = spawnIndex.get(key)
+    // amount null = population inconnue : on ne la remplace pas par un compte
+    // de lignes, qui passerait pour une mesure.
+    spawnIndex.set(key, spawn.amount === null
+      ? (previous ?? null)
+      : (previous ?? 0) + spawn.amount)
   }
 
   for (const [key, amount] of spawnIndex) {
@@ -138,8 +167,9 @@ async function main() {
     if (mob) (mob.spawns ||= []).push({ map: mapId, amount })
   }
 
-  for (const map of maps.values()) map.mobs.sort((a, b) => b.amount - a.amount)
-  for (const mob of mobs.values()) if (mob.spawns) mob.spawns.sort((a, b) => b.amount - a.amount)
+  const byAmount = (a, b) => (b.amount ?? 0) - (a.amount ?? 0)
+  for (const map of maps.values()) map.mobs.sort(byAmount)
+  for (const mob of mobs.values()) if (mob.spawns) mob.spawns.sort(byAmount)
 
   // Les mobs sans sprite ni spawn sont des ids fantomes : on les ecarte.
   for (const [id, mob] of mobs) {
@@ -156,6 +186,14 @@ async function main() {
     writeJson(args.out, 'mobs.json', toObject(mobs)),
     writeJson(args.out, 'maps.json', toObject(maps)),
   ]
+
+  const localOnly = [...mobs.values()].filter((m) => m.nameLocal && m.nameSource !== 'navi').length
+  if (localOnly) {
+    warnings.push(
+      `${localOnly} mob(s) n'ont qu'un nom non latin dans la navigation : le nom ` +
+      `affiche vient du sprite. Essaie --language enus si une variante anglaise existe.`
+    )
+  }
 
   const meta = {
     generatedAt: new Date().toISOString(),
@@ -174,6 +212,7 @@ async function main() {
     naviConfidence: spawnResult.confidence,
     naviFile: spawnResult.files[0] || null,
     naviAvailable: (spawnResult.available || []).length,
+    hasPopulations: Boolean(spawnResult.hasAmounts),
     sources: [...new Set(sources)],
     warnings,
   }
@@ -189,7 +228,8 @@ async function main() {
   console.log(`Items    : ${meta.counts.items}`)
   console.log(`Mobs     : ${meta.counts.mobs} (${meta.counts.mobsWithSpawns} avec au moins une zone)`)
   console.log(`Cartes   : ${meta.counts.maps}`)
-  console.log(`Spawns   : ${meta.counts.spawns}`)
+  console.log(`Spawns   : ${meta.counts.spawns}` +
+    (meta.hasPopulations ? '' : '  (presence seule : le client ne donne pas les populations)'))
   if (meta.naviFile) {
     console.log(`Navigation : ${meta.naviFile}` +
       (meta.naviAvailable > 1 ? `  (${meta.naviAvailable} langues disponibles, --language pour changer)` : ''))

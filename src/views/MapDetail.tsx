@@ -1,6 +1,6 @@
 import type { Db } from '../data'
 import { mapLoot } from '../data'
-import { ItemLink, MobLink, Chance, Section, Empty, usePaged, MoreButton } from '../ui'
+import { ItemLink, MobLink, Chance, Section, Empty, usePaged, MoreButton, Population } from '../ui'
 
 /** Fiche carte : qui y vit, et tout ce qui peut y tomber. */
 export function MapDetail({ db, id }: { db: Db; id: string }) {
@@ -17,7 +17,7 @@ export function MapDetail({ db, id }: { db: Db; id: string }) {
     )
   }
 
-  const total = map.mobs.reduce((n, m) => n + m.amount, 0)
+  const total = map.mobs.reduce((n, m) => n + (m.amount ?? 0), 0)
 
   return (
     <div className="detail">
@@ -25,7 +25,8 @@ export function MapDetail({ db, id }: { db: Db; id: string }) {
         <div>
           <h1>{map.name}</h1>
           <p className="ids">
-            <code>{map.id}</code> · {total} spawns · {map.mobs.length} espèce(s)
+            <code>{map.id}</code>
+            {db.hasPopulations && <> · {total} spawns</>} · {map.mobs.length} espèce(s)
           </p>
         </div>
       </header>
@@ -48,7 +49,7 @@ export function MapDetail({ db, id }: { db: Db; id: string }) {
                 return (
                   <tr key={entry.id}>
                     <td>{mob ? <MobLink mob={mob} /> : <span className="muted">mob {entry.id}</span>}</td>
-                    <td className="num">{entry.amount}</td>
+                    <td className="num"><Population amount={entry.amount} /></td>
                     <td className="num muted">{(db.dropsByMob.get(entry.id) || []).length || '—'}</td>
                   </tr>
                 )

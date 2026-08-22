@@ -1,6 +1,6 @@
 import type { Db } from '../data'
 import { formatOdds } from '../data'
-import { ItemLink, MapLink, Chance, Section, Empty } from '../ui'
+import { ItemLink, MapLink, Chance, Section, Empty, Population } from '../ui'
 import { href } from '../router'
 
 /** Fiche mob : ce qu'il lache, et ou le trouver. */
@@ -17,7 +17,7 @@ export function MobDetail({ db, id }: { db: Db; id: number }) {
 
   const drops = db.dropsByMob.get(id) || []
   const spawns = mob.spawns || []
-  const total = spawns.reduce((n, s) => n + s.amount, 0)
+  const total = spawns.reduce((n, s) => n + (s.amount ?? 0), 0)
 
   return (
     <div className="detail">
@@ -28,6 +28,7 @@ export function MobDetail({ db, id }: { db: Db; id: number }) {
             id {mob.id}
             {mob.level !== undefined && <> · niveau {mob.level}</>}
             {mob.sprite && <> · sprite <code>{mob.sprite}</code></>}
+            {mob.nameLocal && <> · {mob.nameLocal}</>}
           </p>
         </div>
       </header>
@@ -76,20 +77,28 @@ export function MobDetail({ db, id }: { db: Db; id: number }) {
                 <tr>
                   <th>Carte</th>
                   <th className="num">Population</th>
-                  <th className="num">Part</th>
+                  {db.hasPopulations && <th className="num">Part</th>}
                 </tr>
               </thead>
               <tbody>
                 {spawns.map((spawn) => (
                   <tr key={spawn.map}>
                     <td><MapLink map={db.maps.get(spawn.map) || null} /></td>
-                    <td className="num">{spawn.amount}</td>
-                    <td className="num muted">{total ? `${Math.round((spawn.amount / total) * 100)} %` : ''}</td>
+                    <td className="num"><Population amount={spawn.amount} /></td>
+                    {db.hasPopulations && (
+                      <td className="num muted">
+                        {total && spawn.amount !== null ? `${Math.round((spawn.amount / total) * 100)} %` : ''}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
-            <p className="note">{total} spawns au total sur {spawns.length} carte(s).</p>
+            <p className="note">
+              {db.hasPopulations
+                ? `${total} spawns au total sur ${spawns.length} carte(s).`
+                : `Present sur ${spawns.length} carte(s). Le client ne donne pas le nombre de monstres.`}
+            </p>
           </>
         )}
       </Section>

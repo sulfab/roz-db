@@ -177,9 +177,13 @@ function SearchBox({ db }: { db: Db }) {
 }
 
 function Home({ db }: { db: Db }) {
+  // Sans populations, "la plus peuplee" n'a pas de sens : on classe alors par
+  // nombre d'especes.
+  const weight = (m: (typeof db.mapList)[number]) =>
+    db.hasPopulations ? m.mobs.reduce((n, x) => n + (x.amount ?? 0), 0) : m.mobs.length
   const topMaps = [...db.mapList]
     .filter((m) => m.mobs.length)
-    .sort((a, b) => b.mobs.reduce((n, x) => n + x.amount, 0) - a.mobs.reduce((n, x) => n + x.amount, 0))
+    .sort((a, b) => weight(b) - weight(a))
     .slice(0, 12)
 
   return (
@@ -219,13 +223,13 @@ function Home({ db }: { db: Db }) {
 
       {topMaps.length > 0 && (
         <>
-          <h2>Cartes les plus peuplées</h2>
+          <h2>{db.hasPopulations ? 'Cartes les plus peuplées' : 'Cartes les plus variées'}</h2>
           <ul className="chips">
             {topMaps.map((map) => (
               <li key={map.id}>
                 <a href={href({ name: 'map', id: map.id })}>
                   {map.name}
-                  <span className="count">{map.mobs.reduce((n, x) => n + x.amount, 0)}</span>
+                  <span className="count">{weight(map)}</span>
                 </a>
               </li>
             ))}

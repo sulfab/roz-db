@@ -37,7 +37,8 @@ dès la première commande qui le reçoit : `npm run extract` seul suffit ensuit
 | Icônes des items | `data/texture/…/item/<res>.bmp` | dans le client |
 | Ids et sprites des mobs | `datainfo/npcidentity.lub`, `datainfo/jobname.lub` | dans le client |
 | Noms des cartes | `data/mapnametable.txt` | dans le client |
-| Mob → carte, population, niveau | `navigation/navi_mob_*.lub` | dans le client |
+| Mob → carte | `navigation/navi_mob*.lub`, joint par le sprite | dans le client |
+| Population et niveau des mobs | selon le client — souvent absents | variable |
 | **Tables de drop et taux** | — | **absentes** |
 | Stats des mobs (HP, race, élément) | — | **absentes** |
 
@@ -119,6 +120,19 @@ différence, les parseurs ne savent pas s'ils lisent du source ou du bytecode.
 archives, et l'ordre des `.grf` suit `DATA.INI`. Sans ça on lirait des données périmées là
 où le jeu, lui, lit la version patchée.
 
+**Le mob est retrouvé par son sprite.** Sur Ragnarok Zero, les fichiers de navigation ne
+contiennent ni identifiant de mob, ni niveau, ni population : seulement `{ carte, nom, sprite }`
+(la table s'appelle d'ailleurs `Navi_Mob_strings`). Le lien mob ↔ carte se reconstruit en
+joignant le sprite sur `jobname.lub`, qui donne la correspondance sprite → identifiant. Les
+lignes dont le sprite est inconnu sont comptées et signalées, jamais perdues en silence.
+Quand la population n'est pas dans le client, l'app affiche **présent** et non un nombre :
+inventer un `1` le ferait passer pour une mesure.
+
+**Le nom affiché est celui qu'on peut lire.** Les fichiers de langue contiennent souvent des
+noms coréens, y compris dans la variante `frfr`. Un nom non latin est alors remplacé par le
+sprite mis en forme (`DRAINLIAR` → `Drainliar`), le nom d'origine restant disponible et
+cherchable. `--language enus` si ton client a une variante anglaise utilisable.
+
 **Une seule langue de navigation est lue.** Le client livre le même jeu de spawns en 19
 langues (`navi_mob_frfr.lub`, `navi_mob_enus.lub`, …). Les lire toutes multiplierait chaque
 population par 19 : l'extraction n'en retient qu'une — le français par défaut, puis l'anglais,
@@ -157,7 +171,7 @@ pour caler le parseur sans deviner.
 ## Développement
 
 ```bash
-npm test          # 53 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
+npm test          # 54 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
 npm run build     # typecheck + build statique
 ```
 

@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { tmpdir, makeFakeClient } from './helpers.mjs'
+import { tmpdir, makeFakeClient, makeStringsOnlyClient } from './helpers.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -42,7 +42,7 @@ test('extraction complete sur un client synthetique', () => {
   // --- mobs : nom localise du navi, sprite du jobname ----------------------
   assert.equal(mobs['1002'].sprite, 'PORING')
   assert.equal(mobs['1002'].level, 1)
-  assert.equal(mobs['1039'].name, 'Baphomet')
+  assert.equal(mobs['1039'].name, 'Baphomet FR')
   assert.equal(mobs['1039'].level, 81)
 
   // --- spawns : agreges par carte, tries par population --------------------
@@ -68,7 +68,7 @@ test('extraction complete sur un client synthetique', () => {
   assert.match(meta.naviFile, /navi_mob_frfr/)
   assert.equal(mobs['1002'].name, 'Poring FR') // nom issu de la langue retenue
 
-  assert.deepEqual(meta.naviColumns, { map: 0, id: 1, name: 2, level: 3, amount: 4 })
+  assert.deepEqual(meta.naviColumns, { map: 0, id: 1, sprite: -1, name: 2, level: 3, amount: 4 })
   assert.ok(meta.naviConfidence.map > 0.9)
   assert.ok(meta.naviConfidence.id > 0.9)
 
@@ -173,4 +173,38 @@ test('drops.json est cree vide et jamais ecrase par une extraction', () => {
   // Une nouvelle extraction ne doit pas effacer les drops importes.
   runExtract(client, out)
   assert.deepEqual(JSON.parse(fs.readFileSync(dropsFile, 'utf8')).mobs['1002'].length, 2)
+})
+
+test('navigation reduite aux chaines : le mob est retrouve par son sprite', () => {
+  // Forme reelle de Ragnarok Zero : { carte, nom localise, sprite }, sans
+  // identifiant de mob, sans niveau, sans population.
+  const client = makeStringsOnlyClient(tmpdir())
+  const out = path.join(tmpdir(), 'data')
+  const { mobs, maps, meta } = runExtract(client, out)
+
+  // La jointure passe par jobname.lub : PORING -> 1002.
+  assert.ok(mobs['1002'].spawns, 'aucune zone pour Poring')
+  const poringMaps = mobs['1002'].spawns.map((s) => s.map)
+  assert.ok(poringMaps.includes('prt_fild08'))
+  assert.ok(poringMaps.includes('pay_fild04'))
+  assert.equal(mobs['1039'].spawns.length, 2) // Baphomet, deux cartes
+
+  assert.deepEqual(
+    maps['prt_fild08'].mobs.map((m) => m.id).sort((a, b) => a - b),
+    [1002, 1063]
+  )
+
+  // Sans colonne de population, on n'invente pas de nombre.
+  assert.equal(meta.hasPopulations, false)
+  assert.equal(mobs['1002'].spawns[0].amount, null)
+  assert.ok(meta.warnings.some((w) => /presence/.test(w)), meta.warnings.join(' | '))
+
+  // Le sprite inconnu de jobname.lub est compte, pas silencieusement perdu.
+  assert.ok(meta.warnings.some((w) => /sans mob identifiable/.test(w)), meta.warnings.join(' | '))
+
+  // Le nom vient du sprite : lisible, la ou le fichier ne donne que du coreen.
+  // Le nom d'origine reste disponible pour la recherche.
+  assert.equal(mobs['1002'].name, 'Poring')
+  assert.equal(mobs['1002'].nameLocal, '포링')
+  assert.ok(meta.warnings.some((w) => /nom non latin/.test(w)), meta.warnings.join(' | '))
 })

@@ -189,7 +189,7 @@ export function MapsView({ db, query }: { db: Db; query: string }) {
                 <tr>
                   <th>Nom</th>
                   <th className="num">Espèces</th>
-                  <th className="num">Spawns</th>
+                  {db.hasPopulations && <th className="num">Spawns</th>}
                 </tr>
               </thead>
               <tbody>
@@ -197,7 +197,11 @@ export function MapsView({ db, query }: { db: Db; query: string }) {
                   <tr key={map.id}>
                     <td><MapLink map={map} /></td>
                     <td className="num muted">{map.mobs.length || '—'}</td>
-                    <td className="num muted">{map.mobs.reduce((n, m) => n + m.amount, 0) || '—'}</td>
+                    {db.hasPopulations && (
+                      <td className="num muted">
+                        {map.mobs.reduce((n, m) => n + (m.amount ?? 0), 0) || '—'}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

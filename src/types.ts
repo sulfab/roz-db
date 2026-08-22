@@ -16,12 +16,15 @@ export interface Item {
 
 export interface Spawn {
   map: string
-  amount: number
+  /** null quand le client ne donne que la presence, sans population. */
+  amount: number | null
 }
 
 export interface Mob {
   id: number
   name: string
+  /** Nom d'origine du client quand il n'est pas lisible (coreen, japonais…). */
+  nameLocal?: string
   sprite?: string
   constant?: string
   level?: number
@@ -31,7 +34,7 @@ export interface Mob {
 export interface GameMap {
   id: string
   name: string
-  mobs: Array<{ id: number; amount: number }>
+  mobs: Array<{ id: number; amount: number | null }>
 }
 
 export interface Drop {
@@ -58,6 +61,8 @@ export interface Meta {
   /** Fichier de navigation retenu parmi les langues disponibles. */
   naviFile?: string | null
   naviAvailable?: number
+  /** false quand la navigation ne donne que la presence des monstres. */
+  hasPopulations?: boolean
   sources: string[]
   warnings: string[]
 }

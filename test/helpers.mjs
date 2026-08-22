@@ -83,6 +83,53 @@ export function readGrfEntries(target) {
   return files
 }
 
+/**
+ * Client dont les fichiers de navigation ont la forme reellement observee sur
+ * Ragnarok Zero : { carte, nom localise, sprite }. Ni identifiant de mob, ni
+ * niveau, ni population — le mob ne se retrouve que par son sprite.
+ */
+export function makeStringsOnlyClient(dir) {
+  makeFakeClient(dir)
+
+  const rows = [
+    ['prt_fild08', '포링', 'PORING'],
+    ['prt_fild08', '루나틱', 'LUNATIC'],
+    ['pay_fild04', '포링', 'PORING'],
+    ['pay_fild04', '포포링', 'POPORING'],
+    ['gef_fild00', '포포링', 'POPORING'],
+    ['prt_maze03', '바포메트', 'BAPHOMET'],
+    ['izlu2dun', '바포메트', 'BAPHOMET'],
+    ['prt_fild01', '포링', 'PORING'],
+    ['prt_fild02', '루나틱', 'LUNATIC'],
+    ['prt_fild03', '포포링', 'POPORING'],
+    ['moc_fild01', '포링', 'PORING'],
+    ['moc_fild02', '루나틱', 'LUNATIC'],
+    ['moc_fild03', '포포링', 'POPORING'],
+    ['pay_fild01', '포링', 'PORING'],
+    ['pay_fild02', '루나틱', 'LUNATIC'],
+    ['gef_fild01', '포링', 'PORING'],
+    ['gef_fild02', '루나틱', 'LUNATIC'],
+    ['gef_fild03', '포포링', 'POPORING'],
+    ['prt_fild04', '포링', 'PORING'],
+    ['prt_fild05', '루나틱', 'LUNATIC'],
+    ['moc_fild04', '포포링', 'POPORING'],
+    ['pay_fild03', '이름없음', 'SPRITE_INCONNU'],
+  ]
+  const strings = `Navi_Mob_strings = {\n${
+    rows.map(([m, n, s]) => `\t{ "${m}", "${n}", "${s}" },`).join('\n')
+  }\n}\n`
+
+  // On remplace toutes les navigations par la forme "chaines seulement".
+  const existing = readGrfEntries(path.join(dir, 'data.grf'))
+  for (const key of Object.keys(existing)) {
+    if (/navi_mob/i.test(key)) delete existing[key]
+  }
+  existing['data\\luafiles514\\lua files\\navigation\\navi_mob.lub'] = strings
+  existing['data\\luafiles514\\lua files\\navigation\\navi_mob_frfr.lub'] = strings
+  writeGrf(path.join(dir, 'data.grf'), existing)
+  return dir
+}
+
 export function tmpdir(prefix = 'rozdb-') {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix))
 }
@@ -203,10 +250,15 @@ Navi_MobDATA = {
     'prontera.rsw#Prontera#',
   ].join('\n')
 
-  // Le vrai client livre le meme jeu de spawns en 19 langues : on en met
-  // plusieurs pour que les tests attrapent tout cumul accidentel.
-  const naviFr = naviMob.replace(/"Poring"/g, '"Poring FR"')
-  const naviKr = naviMob.replace(/"Poring"/g, '"Poring KR"')
+  // Le vrai client livre le meme jeu de spawns dans une vingtaine de langues :
+  // on en met plusieurs pour que les tests attrapent tout cumul accidentel.
+  // Les noms localises different des sprites, comme dans le vrai client.
+  const localize = (suffix) => naviMob.replace(
+    /"(Poring|Lunatic|Poporing|Baphomet)"/g,
+    (_, name) => `"${name} ${suffix}"`
+  )
+  const naviFr = localize('FR')
+  const naviKr = localize('KR')
 
   writeGrf(path.join(dir, 'data.grf'), {
     'System/itemInfo.lub': itemInfo,

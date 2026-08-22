@@ -81,6 +81,12 @@ export function Chance({ value }: { value: number }) {
   )
 }
 
+/** Une population absente s'affiche comme telle, jamais comme un zero. */
+export function Population({ amount }: { amount: number | null | undefined }) {
+  if (amount === null || amount === undefined) return <span className="muted" title="Le client ne donne pas le nombre de monstres">présent</span>
+  return <>{amount}</>
+}
+
 export function Empty({ children }: { children: ReactNode }) {
   return <p className="empty">{children}</p>
 }
