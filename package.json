@@ -18,7 +18,8 @@
     "extract": "node tools/extract.mjs",
     "icons": "node tools/icons.mjs",
     "import-drops": "node tools/import-drops.mjs",
-    "watch": "node tools/watch.mjs"
+    "watch": "node tools/watch.mjs",
+    "hunt": "node tools/hunt-drops.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

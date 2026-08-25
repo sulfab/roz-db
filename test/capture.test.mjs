@@ -169,3 +169,36 @@ test('en ligne de commande, le seuil calcule est bien celui applique', () => {
   assert.equal(count, 2, output)
   assert.match(output, /Seuil retenu : (?:[3-9]|\d\d)/, output)
 })
+
+test('une table Lua qui rattache un monstre a des objets est reconnue', async () => {
+  const { huntLuaTables } = await import('../tools/hunt-drops.mjs')
+  const oracle = { mobs: new Set([1002, 1280]), items: new Set([909, 501, 4001, 1202]) }
+  // La forme compte, pas le nom : une cle qui est un monstre, une valeur qui
+  // contient plusieurs objets.
+  const table = { Drops: { 1002: [{ id: 909 }, { id: 501 }, { id: 4001 }] } }
+  const hits = huntLuaTables(table, oracle)
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].mob, 1002)
+  assert.deepEqual(hits[0].objets.sort((a, b) => a - b), [501, 909, 4001])
+})
+
+test('un monstre avec un seul objet ne fait pas une table de drop', async () => {
+  const { huntLuaTables } = await import('../tools/hunt-drops.mjs')
+  const oracle = { mobs: new Set([1002]), items: new Set([909]) }
+  assert.deepEqual(huntLuaTables({ 1002: [909] }, oracle), [])
+})
+
+test('une ligne de texte type mob_db est reconnue', async () => {
+  const { huntTextLines } = await import('../tools/hunt-drops.mjs')
+  const oracle = { mobs: new Set([1002]), items: new Set([909, 501, 4001]) }
+  const hits = huntTextLines('1002,PORING,Poring,1,50,0,909,7000,501,800,4001,20\n', oracle)
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].mob, 1002)
+  assert.deepEqual(hits[0].objets.sort((a, b) => a - b), [501, 909, 4001])
+})
+
+test('une ligne sans monstre connu n est pas retenue', async () => {
+  const { huntTextLines } = await import('../tools/hunt-drops.mjs')
+  const oracle = { mobs: new Set([1002]), items: new Set([909, 501, 4001]) }
+  assert.deepEqual(huntTextLines('9999,X,Y,1,50,0,909,7000,501,800,4001,20\n', oracle), [])
+})
