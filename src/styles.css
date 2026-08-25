@@ -234,3 +234,4 @@ table.grid tr:hover td { background: var(--panel-2); }
 /* Une fois detachee, la fenetre n'a plus ni barre laterale ni marges d'ecran. */
 body.overlay-detache { padding: 10px; background: var(--bg); color: var(--text); }
 body.overlay-detache .overlay-mobs { margin-top: 0; }
+.overlay-butin .fiche { margin: 0 0 4px; color: var(--muted); font-size: .9em; }

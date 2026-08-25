@@ -237,3 +237,34 @@ test('une carte inconnue du client n est pas inventee', () => {
   const { packets } = framePackets(build([{ opcode: 0x0091, body }]), 0, new Map([[0x0091, 24]]))
   assert.deepEqual(readMapChanges(packets, new Set(['prontera'])), [])
 })
+
+test('un identifiant lisible par accident ne passe pas pour un nom', () => {
+  // 0x...6669 se lit "if" : c'est exactement ce que produisait la version qui
+  // gardait la premiere position livrant du texte. Ici le vrai nom est plus
+  // loin, et c'est lui qui doit ressortir.
+  const reponse = (aid, gid, nom) => {
+    const body = Buffer.alloc(32)
+    body.writeUInt32LE(aid, 0)
+    body.writeUInt32LE(gid, 4)
+    body.write(nom, 8, 'latin1')
+    return { opcode: 0x0adf, body }
+  }
+  const flux = build([
+    reponse(5001, 0x00006669, 'Megalodon'),
+    reponse(5002, 0x00000001, 'Steam Goblin'),
+    reponse(5003, 0x00006d58, 'Poring'),
+  ])
+  const { packets } = framePackets(flux, 0, new Map([[0x0adf, 34]]))
+  const replies = readNameReplies(packets)
+  assert.deepEqual(replies.map((r) => r.name), ['Megalodon', 'Steam Goblin', 'Poring'])
+  assert.deepEqual([...new Set(replies.map((r) => r.offset))], [8])
+})
+
+test('un champ de nom doit etre complete par des zeros', () => {
+  // Du texte suivi d'autre chose n'est pas un champ de nom : c'est du hasard.
+  const body = Buffer.alloc(32, 0x41)
+  body.writeUInt32LE(5001, 0)
+  const flux = build([{ opcode: 0x0adf, body }, { opcode: 0x0adf, body }])
+  const { packets } = framePackets(flux, 0, new Map([[0x0adf, 34]]))
+  assert.deepEqual(readNameReplies(packets), [])
+})

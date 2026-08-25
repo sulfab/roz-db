@@ -71,12 +71,30 @@ function parseArgs(argv) {
   return args
 }
 
+/** Longueur en deca de laquelle un nom n'en est pas un. */
+const NOM_MINIMUM = 3
+
 /** Etat cumule, relu au demarrage : une session reprend la precedente. */
 function loadState(file) {
   if (fs.existsSync(file)) {
-    try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { /* on repart de zero */ }
+    try { return nettoyer(JSON.parse(fs.readFileSync(file, 'utf8'))) } catch { /* on repart de zero */ }
   }
   return { version: 1, octets: 0, morceaux: 0, cartes: {}, mobs: {}, pistes: {}, objets: {} }
+}
+
+/**
+ * Repare un fichier ecrit par une version qui lisait mal les noms.
+ *
+ * Elle gardait la premiere position livrant du texte, et les octets d'un
+ * identifiant s'y lisaient parfois comme deux lettres — "if", "Xm". Ces noms-la
+ * sont effaces au chargement : le prochain survol du monstre les remplacera par
+ * le vrai, et en attendant le nom du client vaut mieux qu'une bribe.
+ */
+function nettoyer(state) {
+  for (const mob of Object.values(state.mobs || {})) {
+    if (mob.nomServeur && mob.nomServeur.length < NOM_MINIMUM) mob.nomServeur = null
+  }
+  return state
 }
 
 function saveState(file, state) {

@@ -413,35 +413,79 @@ export function inferItemPackets(packets, knownItemIds, { minCount = 3 } = {}) {
  * les paquets qui commencent par un identifiant deja croise dans une apparition
  * et qui contiennent, juste apres, du texte lisible.
  */
-const NAME_OFFSETS = [4, 6, 8]
+const NAME_OFFSETS = [4, 6, 8, 10, 12]
 /** Un paquet isole qui contient du texte ne prouve rien : il en faut plusieurs. */
 const MIN_NAME_REPLIES = 2
+/** Part des paquets d'un meme numero ou le champ doit livrer un nom. */
+const PART_NOMMEE = 0.6
 
 export function readNameReplies(packets, knownIds = null) {
-  // Par numero de paquet et par position : un vrai paquet de nom repond
-  // toujours au meme endroit. Un octet de texte tombe par hasard ailleurs, lui,
-  // ne se repete pas.
-  const groups = new Map()
+  // On essaie toutes les positions, et surtout on n'en retient aucune avant de
+  // les avoir toutes vues.
+  //
+  // La version precedente gardait la premiere position qui livrait du texte, et
+  // c'etait faux : dans un paquet ou le nom est plus loin, les octets d'un
+  // identifiant tombent parfois sur des caracteres lisibles — un identifiant
+  // finissant par 0x66 0x69 se lit "if". Le champ juste devant le nom livrait
+  // donc des bribes de deux lettres, qui passaient devant le vrai nom.
+  const parOpcode = new Map()
   for (const p of packets) {
     if (p.payload.length < 8) continue
     const id = p.payload.readUInt32LE(0)
     if (knownIds && !knownIds.has(id)) continue
-    for (const at of NAME_OFFSETS) {
-      const nom = leadingName(p.payload.subarray(at))
-      if (!nom) continue
-      const key = `${p.opcode}:${at}`
-      if (!groups.has(key)) groups.set(key, [])
-      groups.get(key).push({ opcode: p.opcode, id, name: nom, offset: at })
-      break
-    }
+    if (!parOpcode.has(p.opcode)) parOpcode.set(p.opcode, [])
+    parOpcode.get(p.opcode).push({ p, id })
   }
 
   const replies = []
-  for (const group of groups.values()) {
-    if (group.length < MIN_NAME_REPLIES) continue
-    replies.push(...group)
+  for (const [opcode, group] of parOpcode) {
+    // Le vrai champ de nom en livre un dans presque tous les paquets ; une
+    // suite d'octets lisibles par accident, seulement de temps en temps.
+    let best = null
+    for (const at of NAME_OFFSETS) {
+      const noms = []
+      for (const { p, id } of group) {
+        const nom = champNom(p.payload, at)
+        if (nom) noms.push({ opcode, id, name: nom, offset: at })
+      }
+      if (noms.length < MIN_NAME_REPLIES) continue
+      if (noms.length < group.length * PART_NOMMEE) continue
+      const lettres = noms.reduce((n, r) => n + r.name.length, 0)
+      if (!best || noms.length > best.noms.length ||
+          (noms.length === best.noms.length && lettres > best.lettres)) {
+        best = { noms, lettres }
+      }
+    }
+    if (best) replies.push(...best.noms)
   }
   return replies
+}
+
+/**
+ * Lit un champ de nom a taille fixe.
+ *
+ * Ces champs sont des tampons de largeur constante, completes par des zeros.
+ * Exiger ce remplissage ecarte d'un coup les octets lisibles par hasard : un
+ * identifiant qui se lit "if" n'est pas suivi de zeros jusqu'au bout du champ.
+ */
+const LARGEURS_NOM = [24, 16, 32]
+
+function champNom(payload, at, min = 3) {
+  for (const largeur of LARGEURS_NOM) {
+    const fin = at + largeur
+    if (fin > payload.length) continue
+    let n = at
+    while (n < fin && payload[n] >= 0x20 && payload[n] <= 0x7e) n++
+    if (n - at < min) continue
+    // Un champ termine par un zero l'est toujours : du texte qui remplit le
+    // tampon jusqu'au dernier octet n'est pas un nom, c'est autre chose.
+    if (n >= fin) continue
+    let plein = true
+    for (let k = n; k < fin; k++) if (payload[k] !== 0) { plein = false; break }
+    if (!plein) continue
+    return payload.subarray(at, n).toString('latin1')
+  }
+  return null
 }
 
 /** Texte lisible en tete de zone, termine par un octet nul ou la fin. */

@@ -220,10 +220,18 @@ export function Overlay({ db }: { db: Db }) {
  */
 function Butin({ mob, db }: { mob: MobObserve; db: Db }) {
   const table = db.dropsByMob.get(mob.id) ?? []
+  const fiche = db.mobs.get(mob.id)
   const nomObjet = (id: number) => db.items.get(id)?.name ?? `objet ${id}`
 
   return (
     <div className="overlay-butin">
+      <p className="fiche">
+        <a href={`#/mob/${mob.id}`} target="_blank" rel="noreferrer">#{mob.id}</a>
+        {fiche?.level ? ` · niveau ${fiche.level}` : ''}
+        {mob.nomServeur && mob.nomClient && mob.nomServeur !== mob.nomClient
+          ? ` · ${mob.nomClient} dans le client`
+          : ''}
+      </p>
       {mob.drops.length > 0 && (
         <>
           <h3>Observé cette session</h3>
@@ -263,7 +271,11 @@ function Butin({ mob, db }: { mob: MobObserve; db: Db }) {
       )}
 
       {!mob.drops.length && !table.length && (
-        <p className="avertissement">Rien vu tomber, et aucune table importée pour cette espèce.</p>
+        <p className="avertissement">
+          Rien vu tomber pour l'instant, et aucune table importée. Les objets au sol
+          n'apparaissent dans la base qu'après avoir été observés en train de tomber : tue-en
+          quelques-uns pendant que la capture tourne.
+        </p>
       )}
     </div>
   )
