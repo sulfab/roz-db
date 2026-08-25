@@ -58,7 +58,9 @@ test('extraction complete sur un client synthetique', () => {
     maps['prt_fild08'].mobs.map((m) => m.id).sort((a, b) => a - b),
     [1002, 1063]
   )
-  assert.equal(maps['prontera'].name, 'Prontera') // carte sans mob : conservee
+  // Carte sans mob : conservee. Son nom reste celui de la table d'origine,
+  // la variante localisee du client de test ne la couvrant pas.
+  assert.match(maps['prontera'].name, /가/)
   assert.deepEqual(maps['prontera'].mobs, [])
 
   // --- colonnes du navi deduites, pas supposees ----------------------------
@@ -348,11 +350,18 @@ test('aucune variante lisible : on le dit, au lieu d afficher du coreen sans pre
   assert.ok(meta.warnings.some((w) => /alphabet non latin/.test(w)), meta.warnings.join(' | '))
 })
 
-test('noms de cartes : la variante lisible est preferee a l originale', () => {
+test('noms de cartes : la variante localisee se superpose, sans perdre le reste', () => {
+  // La variante francaise du client de test ne couvre que cinq cartes, comme
+  // celle d'un vrai client qui n'en couvre que la moitie.
   const client = makeFakeClient(tmpdir())
   const out = path.join(tmpdir(), 'data')
   const { maps, meta } = runExtract(client, out)
 
-  assert.equal(maps['prt_fild08'].name, 'Prontera Field 8')
+  assert.equal(maps['prt_fild08'].name, 'Prontera Field 8') // couverte
+  assert.match(maps['prontera'].name, /가/)                  // absente : l'originale reste
+
+  // Aucune carte perdue : les deux tables sont fusionnees, pas substituees.
+  assert.equal(meta.counts.maps, 21)
   assert.ok(meta.sources.includes('data/mapnametable_frfr.txt'), meta.sources.join(' | '))
+  assert.ok(meta.sources.includes('data/mapnametable.txt'), meta.sources.join(' | '))
 })

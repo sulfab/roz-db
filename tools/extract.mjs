@@ -42,9 +42,15 @@ Options
 `
 
 /**
- * Noms de cartes. Le client livre la table d'origine et des variantes
- * localisees : on prend la premiere qui donne des noms lisibles, sans se fier
- * au seul suffixe — `navi_mob_frfr.lub` contient du coreen malgre le sien.
+ * Noms de cartes.
+ *
+ * Le client livre la table d'origine et des variantes localisees, mais les
+ * secondes sont partielles : sur un vrai client, la version francaise ne couvre
+ * que la moitie des cartes. Les substituer perdrait le reste — on les superpose
+ * donc, carte par carte, en preferant le premier nom lisible.
+ *
+ * Le suffixe seul ne decide pas : navi_mob_frfr.lub contient du coreen malgre
+ * le sien. C'est le contenu qui tranche.
  */
 function extractMapNames(vfs, encoding, language) {
   const candidates = [
@@ -53,16 +59,29 @@ function extractMapNames(vfs, encoding, language) {
     'data/mapnametable.txt',
   ]
 
-  let fallback = null
+  const tables = []
   for (const path of candidates) {
     const buf = vfs.read(path)
     if (!buf) continue
     const names = parseMapNameTable(decode(buf, encoding))
-    if (!names.size) continue
-    if (readableRatio([...names.values()]) >= 0.5) return { names, source: path }
-    fallback ||= { names, source: path }
+    if (names.size) tables.push({ path, names })
   }
-  return fallback || { names: new Map(), source: null }
+  if (!tables.length) return { names: new Map(), sources: [], localized: 0 }
+
+  const ids = new Set(tables.flatMap((t) => [...t.names.keys()]))
+  const names = new Map()
+  let localized = 0
+
+  for (const id of ids) {
+    const readable = tables.find((t) => isReadableName(t.names.get(id)))
+    const any = tables.find((t) => t.names.get(id))
+    const chosen = readable || any
+    if (!chosen) continue
+    names.set(id, chosen.names.get(id))
+    if (readable && readable !== tables[tables.length - 1]) localized++
+  }
+
+  return { names, sources: tables.map((t) => t.path), localized }
 }
 
 function writeJson(dir, name, value) {
@@ -97,9 +116,12 @@ async function main() {
   const sources = []
 
   // --- cartes -------------------------------------------------------------
-  const { names: mapNames, source: mapSource } = extractMapNames(vfs, args.encoding, args.language)
-  if (mapSource) sources.push(mapSource)
-  else warnings.push('data/mapnametable.txt absent : les cartes n\'auront pas de nom lisible.')
+  const mapResult = extractMapNames(vfs, args.encoding, args.language)
+  const mapNames = mapResult.names
+  sources.push(...mapResult.sources)
+  if (!mapResult.sources.length) {
+    warnings.push('Aucune table de noms de cartes : les cartes garderont leur identifiant.')
+  }
 
   // --- items --------------------------------------------------------------
   const itemResult = extractItems(vfs, { encoding: args.encoding, language: args.language })
