@@ -86,7 +86,10 @@ const pipApi = (): PipApi | null =>
 export function Overlay({ db }: { db: Db }) {
   const { etat, connecte } = useEtat()
   const [choisi, setChoisi] = useState<number | null>(null)
+  const [detache, setDetache] = useState(false)
+  const [erreur, setErreur] = useState<string | null>(null)
   const racine = useRef<HTMLDivElement>(null)
+  const ancre = useRef<HTMLDivElement>(null)
 
   const surCarte = useMemo(() => {
     if (!etat) return []
@@ -97,10 +100,28 @@ export function Overlay({ db }: { db: Db }) {
       .sort((a, b) => (especes[String(b.id)] ?? 0) - (especes[String(a.id)] ?? 0))
   }, [etat])
 
+  /**
+   * Deplace la liste dans une fenetre d'incrustation.
+   *
+   * Le noeud est deplace, pas recopie : React continue de le mettre a jour
+   * comme si de rien n'etait, et l'affichage reste vivant dans la nouvelle
+   * fenetre. En contrepartie il faut le ramener quand elle se ferme, sinon la
+   * page d'origine reste vide.
+   */
   const detacher = async () => {
     const api = pipApi()
     if (!api || !racine.current) return
-    const fenetre = await api.requestWindow({ width: 380, height: 520 })
+
+    let fenetre: PipWindow
+    try {
+      fenetre = await api.requestWindow({ width: 380, height: 520 })
+    } catch (err) {
+      // Chrome refuse sans geste de l'utilisateur, ou si une incrustation est
+      // deja ouverte. Autant le dire que laisser le bouton sans effet.
+      setErreur(err instanceof Error ? err.message : String(err))
+      return
+    }
+
     for (const feuille of Array.from(document.styleSheets)) {
       try {
         const css = Array.from(feuille.cssRules).map((r) => r.cssText).join('\n')
@@ -111,6 +132,12 @@ export function Overlay({ db }: { db: Db }) {
     }
     fenetre.document.body.classList.add('overlay-detache')
     fenetre.document.body.appendChild(racine.current)
+    setDetache(true)
+
+    fenetre.addEventListener('pagehide', () => {
+      if (racine.current && ancre.current) ancre.current.appendChild(racine.current)
+      setDetache(false)
+    })
   }
 
   return (
@@ -124,13 +151,26 @@ export function Overlay({ db }: { db: Db }) {
               : 'en attente de la capture'}
           </p>
         </div>
-        {pipApi() && (
-          <button type="button" onClick={detacher}>
-            Toujours au-dessus
+        {pipApi() ? (
+          <button type="button" onClick={detacher} disabled={detache}>
+            {detache ? 'Fenêtre ouverte' : 'Toujours au-dessus'}
           </button>
+        ) : (
+          <p className="sous-titre">
+            Ton navigateur ne sait pas ouvrir de fenêtre toujours au-dessus. Il faut Chrome ou
+            Edge 116+, et une adresse en <code>localhost</code> ou <code>https</code>.
+          </p>
         )}
       </header>
 
+      {erreur && <p className="avertissement">Fenêtre refusée : {erreur}</p>}
+      {detache && (
+        <p className="sous-titre">
+          La liste est dans la fenêtre d'incrustation. Ferme-la pour la ramener ici.
+        </p>
+      )}
+
+      <div ref={ancre}>
       <div ref={racine} className="overlay-corps">
         {!connecte && (
           <Empty>
@@ -164,6 +204,7 @@ export function Overlay({ db }: { db: Db }) {
             </li>
           ))}
         </ul>
+      </div>
       </div>
     </div>
   )
