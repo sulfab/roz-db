@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { spawnSync } from 'node:child_process'
 import { readCapture, reassemble, loadFlows, looksTls } from '../tools/pcap.mjs'
 import { findDropTables, guessScale } from '../tools/analyze-capture.mjs'
 
@@ -99,4 +100,18 @@ test('capture illisible : erreur explicite', () => {
   fs.writeFileSync(bad, Buffer.from('ceci n est pas un pcap'))
   assert.throws(() => readCapture(bad), /format de capture inconnu/)
   fs.unlinkSync(bad)
+})
+
+test('les outils en ligne de commande demarrent vraiment', () => {
+  // Le garde d'entree comparait une URL file:// a un chemin brut. Sous Windows,
+  // process.argv[1] vaut C:\chemin\outil.mjs, jamais egal a file:///C:/chemin/... :
+  // main() n'etait donc jamais appele et la commande ne produisait rien.
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  for (const tool of ['analyze-capture.mjs', 'icons.mjs']) {
+    const r = spawnSync(process.execPath, [path.join(root, 'tools', tool), '--help'], {
+      encoding: 'utf8',
+    })
+    const output = (r.stdout || '') + (r.stderr || '')
+    assert.ok(output.trim().length > 0, `${tool} n'a rien affiche`)
+  }
 })

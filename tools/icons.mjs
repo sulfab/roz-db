@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { PNG } from 'pngjs'
 import { openClient } from './vfs.mjs'
 import { resolveClientDir } from './client-path.mjs'
@@ -152,4 +152,6 @@ function main() {
   console.log(`Sortie         : ${out}`)
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main()
+// Compare des URL des deux cotes : sous Windows, process.argv[1] vaut
+// C:\chemin\fichier.mjs, qui n'est jamais egal a file:///C:/chemin/....
+if (import.meta.url === pathToFileURL(process.argv[1]).href) main()
