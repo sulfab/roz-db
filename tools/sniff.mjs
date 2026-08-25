@@ -116,14 +116,38 @@ function findGameConnection() {
   }
 }
 
-/** Attend Ctrl+C, ou la duree demandee. */
-function waitForStop(duration) {
+/**
+ * Attend Ctrl+C, ou la duree demandee.
+ *
+ * Le minuteur n'est pas seulement la pour afficher la progression : un
+ * gestionnaire de signal ne suffit pas a retenir Node, qui rend la main des que
+ * sa boucle d'evenements est vide. Sans lui, la capture s'arretait aussitot.
+ */
+function waitForStop(duration, onTick) {
   return new Promise((resolve) => {
     let done = false
-    const finish = () => { if (!done) { done = true; resolve() } }
+    const tick = setInterval(() => onTick?.(), 2000)
+    const finish = () => {
+      if (done) return
+      done = true
+      clearInterval(tick)
+      if (timer) clearTimeout(timer)
+      resolve()
+    }
+    const timer = duration ? setTimeout(finish, duration * 1000) : null
     process.on('SIGINT', finish)
-    if (duration) setTimeout(finish, duration * 1000).unref?.()
   })
+}
+
+/** Progression pendant la capture : sans elle, on ne sait pas si ca marche. */
+function progressReporter(file) {
+  let last = -1
+  return () => {
+    const size = fs.existsSync(file) ? fs.statSync(file).size : 0
+    if (size === last) return
+    last = size
+    process.stdout.write(`\r  ${(size / 1024).toFixed(0)} ko captures...   `)
+  }
 }
 
 /**
@@ -158,9 +182,9 @@ async function capturePktmon({ port, out, duration }) {
   console.log('\nCapture en cours. Dans le jeu, ouvre les fiches des monstres qui t\'interessent,')
   console.log('puis Ctrl+C pour arreter.\n')
 
-  await waitForStop(duration)
+  await waitForStop(duration, progressReporter(etl))
 
-  console.log('\nArret de la capture...')
+  console.log('\n\nArret de la capture...')
   run('pktmon', ['stop'])
   run('pktmon', ['filter', 'remove'])
 
@@ -185,7 +209,9 @@ async function captureWireshark(tool, { host, port, out, duration, iface }) {
   fs.mkdirSync(path.dirname(out), { recursive: true })
   const cmdArgs = ['-f', filter, '-w', out]
   if (iface) cmdArgs.unshift('-i', String(iface))
-  if (duration) cmdArgs.push('-a', `duration:${duration}`)
+  // `-a duration:` est une option de dumpcap et tshark ; tcpdump ne la connait
+  // pas, on l'arrete par signal a la place.
+  if (duration && tool.kind === 'wireshark') cmdArgs.push('-a', `duration:${duration}`)
 
   console.log(`Filtre  : ${filter}`)
   console.log(`Sortie  : ${out}`)
@@ -194,9 +220,14 @@ async function captureWireshark(tool, { host, port, out, duration, iface }) {
   const child = spawn(tool.cmd, cmdArgs, { stdio: ['ignore', 'inherit', 'inherit'] })
   const stop = () => { try { child.kill('SIGINT') } catch { /* deja arrete */ } }
   process.on('SIGINT', stop)
-  if (duration) setTimeout(stop, (duration + 2) * 1000).unref?.()
+
+  const tick = setInterval(progressReporter(out), 2000)
+  const timer = duration ? setTimeout(stop, duration * 1000) : null
 
   await new Promise((resolve) => child.on('exit', resolve))
+  clearInterval(tick)
+  if (timer) clearTimeout(timer)
+  console.log('')
   return out
 }
 
