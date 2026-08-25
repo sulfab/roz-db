@@ -154,4 +154,5 @@ function main() {
 
 // Compare des URL des deux cotes : sous Windows, process.argv[1] vaut
 // C:\chemin\fichier.mjs, qui n'est jamais egal a file:///C:/chemin/....
-if (import.meta.url === pathToFileURL(process.argv[1]).href) main()
+// argv[1] est absent quand le module est importe, notamment par les tests.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()

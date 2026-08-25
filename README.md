@@ -89,6 +89,15 @@ restent utilisables — `--tool wireshark` pour forcer. Les CGU de Gravity inter
 une écoute passive de son propre trafic n'est pas de la triche, mais l'appréciation leur
 appartient.
 
+**Le seuil de reconnaissance est calculé, pas choisi.** Un client de 9 646 items occupe 15 %
+des valeurs 16 bits : une valeur quelconque a une chance sur sept d'être un « item valide »,
+et quatre coïncidences alignées dans quelques kilo-octets sont attendues des dizaines de
+fois. L'analyseur calcule donc, à partir de la densité de l'oracle et de la taille des
+données, le nombre d'entrées consécutives au-delà duquel le hasard produirait moins d'une
+fausse table sur cent — huit entrées pour un oracle dense en 16 bits, trois seulement en
+32 bits où l'espace est immense. Il rejette aussi les tables où un identifiant se répète :
+une table de drop ne liste pas deux fois le même objet.
+
 **L'analyse ne suppose aucun format de paquet.** Il n'est pas public, et le deviner
 produirait des chiffres faux sans qu'on s'en aperçoive. Une table de drop, quel que soit son
 enrobage, est une suite d'enregistrements de taille constante contenant chacun un
@@ -219,7 +228,7 @@ pour caler le parseur sans deviner.
 ## Développement
 
 ```bash
-npm test          # 70 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
+npm test          # 73 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
 npm run build     # typecheck + build statique
 ```
 

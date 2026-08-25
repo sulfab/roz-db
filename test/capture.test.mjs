@@ -5,7 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { readCapture, reassemble, loadFlows, looksTls } from '../tools/pcap.mjs'
-import { findDropTables, guessScale } from '../tools/analyze-capture.mjs'
+import { findDropTables, guessScale, minimumRun, oracleDensity } from '../tools/analyze-capture.mjs'
 
 /**
  * capture.pcap est un vrai fichier ecrit par tcpdump (voir
@@ -114,4 +114,29 @@ test('les outils en ligne de commande demarrent vraiment', () => {
     const output = (r.stdout || '') + (r.stderr || '')
     assert.ok(output.trim().length > 0, `${tool} n'a rien affiche`)
   }
+})
+
+test('un oracle dense ne fabrique plus de tables a partir de bruit', () => {
+  // Le cas reel : 9646 items occupent 15 % des valeurs 16 bits. Avec un seuil
+  // fixe a 3 entrees, quelques kilo-octets de trafic quelconque produisaient
+  // 85 "tables" — toutes fausses.
+  const items = new Set(Array.from({ length: 9646 }, (_, i) => 500 + i))
+  const mobs = new Set(Array.from({ length: 585 }, (_, i) => 1000 + i))
+
+  const noise = Buffer.alloc(3000)
+  for (let i = 0; i < noise.length; i++) noise[i] = (i * 2654435761) % 256
+
+  const tables = findDropTables(noise, { items, mobs })
+  assert.equal(tables.length, 0, JSON.stringify(tables.slice(0, 3), null, 2))
+})
+
+test('le seuil suit la densite de l oracle', () => {
+  const dense = new Set(Array.from({ length: 9646 }, (_, i) => 500 + i))
+  const sparse = new Set([909, 501, 4001])
+
+  // Sur 16 bits un oracle dense exige beaucoup d'entrees consecutives.
+  assert.ok(minimumRun(3000, oracleDensity(dense, 2)) >= 7)
+  // Sur 32 bits l'espace est si grand que trois entrees suffisent.
+  assert.equal(minimumRun(3000, oracleDensity(dense, 4)), 3)
+  assert.equal(minimumRun(3000, oracleDensity(sparse, 4)), 3)
 })

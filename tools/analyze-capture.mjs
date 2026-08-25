@@ -19,9 +19,11 @@ import { ROOT } from './client-path.mjs'
  * regularite qu'on cherche, pas un numero de paquet.
  */
 
-const MIN_RUN = 3          // en deca, une coincidence est trop probable
+const MIN_RUN = 3          // plancher absolu ; le vrai seuil est calcule
 const MAX_STRIDE = 32      // taille maximale d'un enregistrement
 const MOB_LOOKBACK = 96    // ou chercher l'identifiant du mob avant la liste
+/** Nombre de fausses tables qu'on accepte de voir apparaitre par hasard. */
+const FALSE_POSITIVE_BUDGET = 0.01
 
 const HELP = `
 Cherche des tables de drop dans une capture reseau du jeu.
@@ -76,6 +78,37 @@ function findItemHits(data, items, width, read) {
     if (value >= 100 && items.has(value)) hits.push(at)
   }
   return hits
+}
+
+/**
+ * Combien d'entrees consecutives faut-il pour que ce ne soit pas un hasard ?
+ *
+ * La question n'a pas de reponse fixe : elle depend de la densite de l'oracle.
+ * Un client de 9646 items occupe 15 % de l'espace des entiers 16 bits — une
+ * valeur quelconque a donc une chance sur sept d'etre un "item valide", et
+ * quatre coincidences alignees dans quelques kilo-octets sont attendues des
+ * dizaines de fois. Sur 32 bits la densite tombe a deux millioniemes et trois
+ * entrees suffisent largement.
+ *
+ * On calcule donc le seuil : le plus petit k tel que le nombre de suites
+ * attendues par hasard reste sous le budget qu'on s'accorde.
+ */
+export function minimumRun(dataLength, density, strides = (MAX_STRIDE - 4) / 2 + 1) {
+  if (density <= 0) return MIN_RUN
+  if (density >= 1) return Infinity
+  const trials = Math.max(1, dataLength * strides)
+  for (let k = MIN_RUN; k <= 64; k++) {
+    if (trials * Math.pow(density, k) < FALSE_POSITIVE_BUDGET) return k
+  }
+  return Infinity
+}
+
+/** Part de l'espace des valeurs qu'occupe l'oracle, pour une largeur donnee. */
+export function oracleDensity(ids, width) {
+  const space = Math.pow(256, width)
+  let inRange = 0
+  for (const id of ids) if (id < space) inRange++
+  return inRange / space
 }
 
 /**
@@ -158,14 +191,25 @@ function findMobId(data, runStart, mobs) {
  * @param {{items: Set<number>, mobs: Set<number>}} oracle
  * @returns {Array<object>} tables candidates, la plus credible en tete
  */
-export function findDropTables(data, oracle, { minRun = MIN_RUN } = {}) {
+export function findDropTables(data, oracle, { minRun = null } = {}) {
   const found = []
 
   for (const { width: itemWidth, read } of readers) {
-    const hits = findItemHits(data, oracle.items, itemWidth, read)
-    if (hits.length < minRun) continue
+    // Seuil propre a cette largeur de lecture : sur 16 bits l'oracle est dense,
+    // sur 32 bits il ne l'est pas.
+    const density = oracleDensity(oracle.items, itemWidth)
+    const required = minRun ?? minimumRun(data.length, density)
+    if (!Number.isFinite(required)) continue
 
-    for (const run of findRuns(hits, minRun)) {
+    const hits = findItemHits(data, oracle.items, itemWidth, read)
+    if (hits.length < required) continue
+
+    for (const run of findRuns(hits, required)) {
+      // Une table de drop ne liste pas deux fois le meme objet. Un tableau ou
+      // un identifiant se repete est un alignement fortuit, pas une structure.
+      const values = run.positions.map((at) => read(data, at))
+      if (new Set(values).size !== values.length) continue
+
       const rate = inferRateField(data, run, itemWidth)
       const mob = findMobId(data, run.start, oracle.mobs)
       const entries = run.positions.map((at, i) => ({
@@ -183,6 +227,8 @@ export function findDropTables(data, oracle, { minRun = MIN_RUN } = {}) {
         mobId: mob ? mob.mobId : null,
         mobDistance: mob ? mob.distance : null,
         entries,
+        density,
+        required,
         // Une table credible : un mob identifie, des taux qui varient, et
         // assez d'entrees pour que le hasard soit exclu.
         score: run.count * 2 + (mob ? 10 : 0) + (rate ? rate.distinct : 0),
@@ -242,7 +288,13 @@ function main() {
     console.error('Sans la liste des identifiants du client, il n\'y a rien pour reconnaitre un drop.')
     process.exit(1)
   }
-  console.log(`Oracle : ${oracle.items.size} items, ${oracle.mobs.size} mobs connus du client\n`)
+  const density16 = oracleDensity(oracle.items, 2)
+  console.log(`Oracle : ${oracle.items.size} items, ${oracle.mobs.size} mobs connus du client`)
+  console.log(
+    `         ces items occupent ${(density16 * 100).toFixed(1)} % des valeurs 16 bits : ` +
+    `une valeur au hasard a ${(1 / density16).toFixed(0)} chances sur ${(1 / density16).toFixed(0)} ` +
+    `d'en etre un par accident.`
+  )
 
   const flows = loadFlows(args.file)
   if (!flows.length) {
@@ -256,6 +308,17 @@ function main() {
       : flow.isServerToClient === false ? 'client -> serveur' : 'sens indetermine'
     console.log(`  ${flow.key.padEnd(46)} ${String(flow.bytes).padStart(9)} o  ${direction}` +
       (flow.gaps ? `  (${flow.gaps} trou(s))` : ''))
+  }
+
+  const serverBytes = flows
+    .filter((f) => f.isServerToClient !== false)
+    .reduce((n, f) => n + f.bytes, 0)
+  if (serverBytes < 50_000) {
+    console.log(
+      `\nSeulement ${serverBytes} octets recus du serveur. Une session de jeu en produit ` +
+      `des centaines de kilo-octets : la capture a probablement demarre apres la connexion, ` +
+      `ou s'est arretee trop tot. Relance-la avant de lancer le jeu.`
+    )
   }
 
   const candidates = flows.filter((f) => f.isServerToClient !== false && f.bytes > 256)
@@ -288,7 +351,12 @@ function main() {
     return
   }
 
-  console.log(`\n${results.length} table(s) candidate(s)\n`)
+  console.log(`\n${results.length} table(s) candidate(s)`)
+  const required = results[0]?.required
+  if (required) {
+    console.log(`Seuil retenu : ${required} entrees consecutives, calcule pour que le hasard ` +
+      `en produise moins d'une centieme.\n`)
+  }
   const best = results.slice(0, 10)
   for (const table of best) {
     const scale = guessScale(table.entries)
@@ -331,4 +399,5 @@ function main() {
 
 // Compare des URL des deux cotes : sous Windows, process.argv[1] vaut
 // C:\chemin\fichier.mjs, qui n'est jamais egal a file:///C:/chemin/....
-if (import.meta.url === pathToFileURL(process.argv[1]).href) main()
+// argv[1] est absent quand le module est importe, notamment par les tests.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()
