@@ -20,7 +20,8 @@
     "import-drops": "node tools/import-drops.mjs",
     "watch": "node tools/watch.mjs",
     "hunt": "node tools/hunt-drops.mjs",
-    "import-external": "node tools/import-external.mjs"
+    "import-external": "node tools/import-external.mjs",
+    "fetch-db": "node tools/fetch-db.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

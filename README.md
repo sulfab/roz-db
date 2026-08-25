@@ -79,6 +79,23 @@ Les bases fan-made (RagnarokZero.net, Midgard Hub) annoncent toutes la même ori
 **TW RO Zero**, en excluant explicitement les données kRO / iRO. C'est pourquoi importer un
 `mob_db` de rAthena serait une erreur : mauvaise lignée.
 
+**La source la plus proche de Zero Global est Divine Pride** : c'est une base multiserveur, et
+sa liste de serveurs contient « Global Zero » — celui-ci, pas un voisin. On peut donc y demander
+les taux du serveur qu'on joue plutôt que ceux d'une autre région.
+
+```bash
+npm run fetch-db -- --url "https://.../Monster/{id}?apiKey=XXX" --max 5   # essai
+npm run fetch-db -- --url "..."                                          # tout
+npm run import-external -- captures/db-distante.json --source "Divine Pride (Global Zero)"
+```
+
+`fetch-db` ne sait rien de l'API qu'on lui donne : il reçoit un gabarit d'adresse avec `{id}`,
+appelle une fois par monstre **du client** — donc uniquement ce qui existe dans le jeu qu'on
+joue — et empile les réponses telles quelles. C'est `import-external` qui en déduit la forme,
+donc changer de base ne demande pas de changer une ligne de code. Une pause d'une seconde par
+défaut et aucun parallélisme : ces bases sont tenues par des bénévoles, et certaines ont dû
+limiter leur débit à cause d'outils qui tapaient des centaines de fois par seconde.
+
 `npm run import-external -- fichier.json` ne suppose aucun nom de champ. Chaque base a les siens
 et ils changent ; coder ceux d'aujourd'hui, c'est casser demain sans s'en apercevoir. L'outil
 cherche la **forme** — un objet portant un identifiant de monstre du client, et une liste dont
