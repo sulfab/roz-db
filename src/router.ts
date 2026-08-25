@@ -14,6 +14,7 @@ export type Route =
   | { name: 'maps'; query: string }
   | { name: 'map'; id: string }
   | { name: 'data' }
+  | { name: 'overlay' }
 
 export function parseHash(hash: string): Route {
   const raw = hash.replace(/^#\/?/, '')
@@ -29,6 +30,7 @@ export function parseHash(hash: string): Route {
     case 'mobs': return { name: 'mobs', query }
     case 'maps': return { name: 'maps', query }
     case 'data': return { name: 'data' }
+    case 'overlay': return { name: 'overlay' }
     default: return { name: 'home' }
   }
 }
@@ -42,6 +44,7 @@ export function href(route: Route): string {
     case 'mobs': return route.query ? `#/mobs?q=${encodeURIComponent(route.query)}` : '#/mobs'
     case 'maps': return route.query ? `#/maps?q=${encodeURIComponent(route.query)}` : '#/maps'
     case 'data': return '#/data'
+    case 'overlay': return '#/overlay'
     default: return '#/'
   }
 }

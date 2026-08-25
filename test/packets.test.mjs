@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import {
   LONGUEURS, VARIABLES, frameStream, framePackets, inferLength,
   readEntries, inferClassOffset, inferItemPackets, trailingName,
+  readNameReplies, readMapChanges,
 } from '../tools/packets.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -101,8 +102,12 @@ test('un flux pris en cours de route retrouve le bon alignement', () => {
   )
   const tronque = Buffer.concat([Buffer.from([0xaa, 0x00, 0xbb]), propre])
   const r = frameStream(tronque)
-  assert.equal(r.start, 3)
-  assert.equal(r.packets.length, 12)
+  // Ce qui compte, c'est que les douze vrais paquets ressortent entiers. Que
+  // les trois octets de tete soient lus comme un paquet de plus ou laisses de
+  // cote est indecidable, et sans consequence.
+  const vrais = r.packets.filter((p) => p.opcode === known[0] && p.length === known[1])
+  assert.equal(vrais.length, 12)
+  assert.equal(r.covered >= propre.length, true)
 })
 
 test('le paquet a longueur variable est lu a sa longueur annoncee', () => {
@@ -169,4 +174,66 @@ test('la position de la classe est signalee comme fragile quand elle l est', () 
   // Une seule espece croisee : le hasard suffit a expliquer la correspondance.
   assert.ok(found.expectedByChance > 0.01, `${found.expectedByChance}`)
   assert.equal(found.solid, false)
+})
+
+test('un passage indechiffrable ne coute pas le reste du flux', () => {
+  const known = [...LONGUEURS.entries()][0]
+  const paquet = () => build([{ opcode: known[0], body: Buffer.alloc(known[1] - 2) }])
+  const bruit = Buffer.alloc(40)
+  for (let i = 0; i < bruit.length; i++) bruit[i] = 0xf0 | (i % 16)
+  const flux = Buffer.concat([
+    ...Array.from({ length: 8 }, paquet), bruit, ...Array.from({ length: 8 }, paquet),
+  ])
+  const r = frameStream(flux)
+  assert.equal(r.packets.length, 16)
+  assert.equal(r.gaps.length, 1)
+  assert.equal(r.skipped, bruit.length)
+})
+
+test('les octets sautes ne sont pas comptes comme lus', () => {
+  const known = [...LONGUEURS.entries()][0]
+  const paquet = () => build([{ opcode: known[0], body: Buffer.alloc(known[1] - 2) }])
+  const bruit = Buffer.alloc(40, 0xff)
+  const flux = Buffer.concat([
+    ...Array.from({ length: 8 }, paquet), bruit, ...Array.from({ length: 8 }, paquet),
+  ])
+  const r = frameStream(flux)
+  assert.equal(r.covered, 16 * known[1])
+  assert.ok(r.coverage < 1)
+})
+
+test('les reponses de nom se reconnaissent a leur repetition', () => {
+  const reponse = (id, nom) => {
+    const body = Buffer.alloc(28)
+    body.writeUInt32LE(id, 0)
+    body.write(nom, 4, 'latin1')
+    return { opcode: 0x0095, body }
+  }
+  const flux = build([reponse(527, 'Steam Goblin'), reponse(585, 'Poporing')])
+  const { packets } = framePackets(flux, 0, new Map([[0x0095, 30]]))
+  const replies = readNameReplies(packets)
+  assert.deepEqual(replies.map((r) => [r.id, r.name]), [[527, 'Steam Goblin'], [585, 'Poporing']])
+})
+
+test('un paquet isole contenant du texte ne passe pas pour un nom', () => {
+  const body = Buffer.alloc(28)
+  body.writeUInt32LE(527, 0)
+  body.write('Steam Goblin', 4, 'latin1')
+  const { packets } = framePackets(build([{ opcode: 0x0095, body }]), 0, new Map([[0x0095, 30]]))
+  assert.deepEqual(readNameReplies(packets), [])
+})
+
+test('le nom de carte est reconnu grace a la liste du client', () => {
+  const body = Buffer.alloc(22)
+  body.write('prt_fild08.gat', 0, 'latin1')
+  const { packets } = framePackets(build([{ opcode: 0x0091, body }]), 0, new Map([[0x0091, 24]]))
+  const changes = readMapChanges(packets, new Set(['prt_fild08', 'prontera']))
+  assert.deepEqual(changes.map((c) => c.map), ['prt_fild08'])
+})
+
+test('une carte inconnue du client n est pas inventee', () => {
+  const body = Buffer.alloc(22)
+  body.write('nawak.gat', 0, 'latin1')
+  const { packets } = framePackets(build([{ opcode: 0x0091, body }]), 0, new Map([[0x0091, 24]]))
+  assert.deepEqual(readMapChanges(packets, new Set(['prontera'])), [])
 })

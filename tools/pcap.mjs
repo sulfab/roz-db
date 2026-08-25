@@ -229,10 +229,44 @@ export function reassemble(capture) {
       data: Buffer.concat(chunks),
       bytes: chunks.reduce((n, c) => n + c.length, 0),
       gaps,
+      origin,
       isServerToClient: servers.size ? servers.has(origin) : null,
     })
   }
-  return out.sort((a, b) => b.bytes - a.bytes)
+  out.sort((a, b) => b.bytes - a.bytes)
+  return inferDirections(out)
+}
+
+/**
+ * Retrouve le sens des flux quand la poignee de main manque.
+ *
+ * Une capture demarree en cours de partie n'a pas vu le SYN, donc on ne sait
+ * pas qui a ouvert la connexion. Mais les deux sens d'une meme connexion ne se
+ * ressemblent pas : le client envoie des ordres de quelques octets, le serveur
+ * renvoie le monde. On ne tranche que si l'ecart est franc — sinon on prefere
+ * ne rien dire.
+ */
+const DIRECTION_RATIO = 4
+
+function inferDirections(flows) {
+  const known = flows.some((f) => f.isServerToClient !== null)
+  if (known) return flows
+  const byPair = new Map()
+  for (const f of flows) {
+    const pair = [`${f.src}:${f.sport}`, `${f.dst}:${f.dport}`].sort().join('|')
+    if (!byPair.has(pair)) byPair.set(pair, [])
+    byPair.get(pair).push(f)
+  }
+  for (const group of byPair.values()) {
+    if (group.length !== 2) continue
+    const [gros, petit] = [...group].sort((a, b) => b.bytes - a.bytes)
+    if (gros.bytes < petit.bytes * DIRECTION_RATIO) continue
+    gros.isServerToClient = true
+    petit.isServerToClient = false
+    gros.directionInferee = true
+    petit.directionInferee = true
+  }
+  return flows
 }
 
 /** Le trafic chiffre TLS commence par un handshake reconnaissable. */

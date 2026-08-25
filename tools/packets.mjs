@@ -25,6 +25,9 @@ const MAX_FIXED = 96
 const LOOKAHEAD = 24
 /** Ou peut commencer le premier paquet entier d'un flux pris en cours de route. */
 const MAX_START = 256
+/** Ce qu'il faut lire d'affilee pour croire qu'on s'est bien recale. */
+const RESYNC_RUN = 6
+const RESYNC_BYTES = 24
 
 /**
  * Longueurs verifiees sur des captures reelles de Ragnarok Zero Global.
@@ -110,10 +113,19 @@ export function inferLength(data, pos, lengths) {
   // Le score ne compte que ce qui vient apres : la longueur elle-meme n'entre
   // pas en ligne de compte, sans quoi la plus grande gagnerait toujours en
   // avalant le reste du flux.
+  //
+  // La longueur essayee est ajoutee a la table le temps du calcul. Sans cela un
+  // paquet encore inconnu ne pouvait jamais s'amorcer : rien de ce qui le suit
+  // n'etant connu non plus, toutes les longueurs marquaient zero. C'est
+  // pourtant la sa meilleure preuve — si le meme paquet revient plus loin au
+  // pas suppose, c'est que le pas est bon.
+  const opcode = opcodeAt(data, pos)
   let best = null
   let tied = false
   for (const len of candidates) {
-    const score = lookahead(data, pos + len, lengths)
+    const essai = new Map(lengths)
+    essai.set(opcode, len)
+    const score = lookahead(data, pos + len, essai)
     if (!best || score > best.score) { best = { len, score }; tied = false }
     else if (score === best.score) tied = true
   }
@@ -129,13 +141,20 @@ export function inferLength(data, pos, lengths) {
  * Les longueurs apprises en chemin sont ajoutees a la table fournie : un paquet
  * inconnu ne coute son inference qu'une fois.
  */
-export function framePackets(data, start, lengths) {
+export function framePackets(data, start, lengths, { resync = false } = {}) {
   const packets = []
   const learned = new Map()
+  const gaps = []
   let pos = start
   while (pos + 2 <= data.length) {
     const opcode = opcodeAt(data, pos)
-    if (!validOpcode(opcode)) break
+    if (!validOpcode(opcode)) {
+      const next = resync ? resyncFrom(data, pos + 1, lengths) : -1
+      if (next < 0) break
+      gaps.push({ at: pos, skipped: next - pos })
+      pos = next
+      continue
+    }
     // Un paquet a longueur variable porte sa longueur sur deux octets de plus :
     // son contenu commence a +4, celui d'un paquet a longueur fixe a +2.
     const variable = VARIABLES.has(opcode)
@@ -144,18 +163,44 @@ export function framePackets(data, start, lengths) {
     if (len === undefined && variable) len = declaredLength(data, pos)
     if (len === undefined || len === null) {
       len = inferLength(data, pos, lengths)
-      if (len === null) break
+    }
+    if (len === null || len === undefined || len < MIN_LENGTH || pos + len > data.length) {
+      // Un paquet indecidable ne doit pas couter tout le reste du flux : on
+      // repart au premier endroit ou le decoupage tient a nouveau, et on
+      // compte les octets sautes plutot que de les passer sous silence.
+      const next = resync ? resyncFrom(data, pos + 1, lengths) : -1
+      if (next < 0) break
+      gaps.push({ at: pos, skipped: next - pos })
+      pos = next
+      continue
+    }
+    if (!lengths.has(opcode) && !variable) {
       lengths.set(opcode, len)
       learned.set(opcode, len)
     }
-    if (len < MIN_LENGTH || pos + len > data.length) break
     packets.push({
       offset: pos, opcode, length: len,
       payload: data.subarray(pos + Math.min(header, len), pos + len),
     })
     pos += len
   }
-  return { packets, learned, end: pos }
+  const skipped = gaps.reduce((n, g) => n + g.skipped, 0)
+  return { packets, learned, gaps, skipped, end: pos }
+}
+
+/**
+ * Cherche ou le flux redevient lisible apres un passage indechiffrable.
+ *
+ * On n'accepte pas la premiere position venue : il faut que le decoupage y
+ * tienne sur plusieurs paquets deja connus, sans quoi on se recalerait sur du
+ * bruit et on repartirait de travers.
+ */
+function resyncFrom(data, from, lengths) {
+  for (let pos = from; pos + 2 <= data.length; pos++) {
+    if (!validOpcode(opcodeAt(data, pos))) continue
+    if (lookahead(data, pos, lengths, RESYNC_RUN) >= RESYNC_BYTES) return pos
+  }
+  return -1
 }
 
 /**
@@ -177,18 +222,43 @@ export function frameStream(data, { lengths = new Map(LONGUEURS) } = {}) {
   let best = null
   for (let start = 0; start < Math.min(MAX_START, data.length - 2); start++) {
     if (!validOpcode(opcodeAt(data, start))) continue
+    // Le depart se choisit sans resynchronisation : sinon tous les departs
+    // couvriraient tout, et il n'y aurait plus rien pour les departager.
     const attempt = framePackets(data, start, new Map(lengths))
     const trusted = attempt.packets
       .filter((p) => !attempt.learned.has(p.opcode))
       .reduce((n, p) => n + p.length, 0)
     const covered = attempt.end - start
-    // A egalite, le decoupage qui a eu besoin d'inventer le moins l'emporte :
-    // un mauvais alignement se paie toujours d'un paquet fabrique.
-    const rank = [trusted, -attempt.learned.size, covered]
+    // A egalite d'octets surs, on prend le decoupage qui explique le plus du
+    // flux. On a d'abord fait l'inverse — preferer celui qui inventait le moins
+    // de longueurs — mais les deux situations sont indiscernables : un debut de
+    // paquet tronque et un vrai paquet inconnu se presentent pareil. Sauter le
+    // second coute une donnee reelle ; garder le premier ne coute qu'un paquet
+    // fantome de quelques octets.
+    const rank = [trusted, covered]
     if (!best || better(rank, best.rank)) best = { start, covered, trusted, rank, ...attempt }
   }
-  if (!best) return { start: 0, packets: [], learned: new Map(), end: 0, covered: 0, coverage: 0 }
-  return { ...best, coverage: best.covered / data.length }
+  if (!best) {
+    return { start: 0, packets: [], learned: new Map(), gaps: [], skipped: 0, end: 0, covered: 0, coverage: 0 }
+  }
+
+  // Deuxieme passe sur le depart retenu : elle beneficie des longueurs apprises
+  // pendant la premiere, donc les paquets qui l'avaient arretee se decoupent
+  // souvent tout seuls. Et cette fois on se resynchronise.
+  const table = new Map(lengths)
+  for (const [opcode, len] of best.learned) table.set(opcode, len)
+  const full = framePackets(data, best.start, table, { resync: true })
+  const covered = full.packets.reduce((n, p) => n + p.length, 0)
+  return {
+    start: best.start,
+    trusted: best.trusted,
+    ...full,
+    // Les longueurs deduites a la premiere passe comptent aussi : la seconde
+    // les recoit toutes faites et n'en apprendrait plus rien.
+    learned: new Map([...best.learned, ...full.learned]),
+    covered,
+    coverage: covered / data.length,
+  }
 }
 
 /**
@@ -330,4 +400,106 @@ export function inferItemPackets(packets, knownItemIds, { minCount = 3 } = {}) {
     }
   }
   return found
+}
+
+/**
+ * Reponses du serveur a une demande de nom.
+ *
+ * C'est la seule source des noms localises : le paquet d'apparition d'un
+ * monstre porte sa classe, pas son nom, et le serveur ne l'envoie que lorsque
+ * le client le demande — donc quand on survole ou cible la creature.
+ *
+ * On ne suppose pas le numero de ce paquet ni la position du nom : on cherche
+ * les paquets qui commencent par un identifiant deja croise dans une apparition
+ * et qui contiennent, juste apres, du texte lisible.
+ */
+const NAME_OFFSETS = [4, 6, 8]
+/** Un paquet isole qui contient du texte ne prouve rien : il en faut plusieurs. */
+const MIN_NAME_REPLIES = 2
+
+export function readNameReplies(packets, knownIds = null) {
+  // Par numero de paquet et par position : un vrai paquet de nom repond
+  // toujours au meme endroit. Un octet de texte tombe par hasard ailleurs, lui,
+  // ne se repete pas.
+  const groups = new Map()
+  for (const p of packets) {
+    if (p.payload.length < 8) continue
+    const id = p.payload.readUInt32LE(0)
+    if (knownIds && !knownIds.has(id)) continue
+    for (const at of NAME_OFFSETS) {
+      const nom = leadingName(p.payload.subarray(at))
+      if (!nom) continue
+      const key = `${p.opcode}:${at}`
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key).push({ opcode: p.opcode, id, name: nom, offset: at })
+      break
+    }
+  }
+
+  const replies = []
+  for (const group of groups.values()) {
+    if (group.length < MIN_NAME_REPLIES) continue
+    replies.push(...group)
+  }
+  return replies
+}
+
+/** Texte lisible en tete de zone, termine par un octet nul ou la fin. */
+export function leadingName(buf, min = 2) {
+  let end = 0
+  while (end < buf.length && buf[end] >= 0x20 && buf[end] <= 0x7e) end++
+  if (end < min) return null
+  // Un nom est suivi de remplissage : du texte qui va jusqu'au bout sans jamais
+  // s'arreter est probablement autre chose.
+  if (end === buf.length && buf.length > 32) return null
+  return buf.subarray(0, end).toString('latin1')
+}
+
+/**
+ * Changements de carte.
+ *
+ * Le nom de la carte circule en clair dans le paquet qui t'y envoie. On le
+ * reconnait a coup sur parce que le client nous a deja donne la liste exacte
+ * des cartes qui existent : pas besoin de connaitre le numero du paquet.
+ */
+export function readMapChanges(packets, knownMaps) {
+  if (!knownMaps?.size) return []
+  const changes = []
+  for (const p of packets) {
+    for (let at = 0; at + 3 <= p.payload.length; at++) {
+      const nom = leadingName(p.payload.subarray(at), 3)
+      if (!nom) continue
+      const carte = nom.replace(/\.gat$/i, '')
+      if (!knownMaps.has(carte)) continue
+      changes.push({ offset: p.offset, opcode: p.opcode, map: carte })
+      break
+    }
+  }
+  return changes
+}
+
+/**
+ * Disparitions : c'est ce qui permet de compter les morts, donc les taux.
+ *
+ * Un taux de drop n'est pas dans le trafic : le serveur envoie ce qui tombe,
+ * pas la probabilite que ca tombe. On ne peut donc que l'observer — combien de
+ * fois telle espece est morte, combien de fois tel objet est apparu ensuite.
+ *
+ * Contrairement au reste de ce fichier, le numero de ce paquet vient d'une
+ * capture reelle et non d'une deduction : rien dans le flux ne distingue une
+ * disparition d'un autre paquet de sept octets portant un identifiant. On ne
+ * retient donc que les identifiants deja vus apparaitre comme monstres, ce qui
+ * rend une confusion sans consequence.
+ */
+export const OPCODE_VANISH = 0x0080
+
+export function readVanishings(packets, mobIds) {
+  const events = []
+  for (const p of packets) {
+    if (p.opcode !== OPCODE_VANISH || p.payload.length < 5) continue
+    const id = p.payload.readUInt32LE(0)
+    if (mobIds && !mobIds.has(id)) continue
+    events.push({ offset: p.offset, id, reason: p.payload[4] })
+  }
+  return events
 }

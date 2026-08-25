@@ -68,6 +68,35 @@ npm run import-drops -- drops.csv --source "encyclopédie in-game" --base 10000
 - Les imports **fusionnent** par défaut (`--replace` pour repartir de zéro), et
   `npm run extract` n'écrase jamais `drops.json`.
 
+### Alimenter la base en jouant
+
+```bash
+npm run build          # une fois, pour que l'overlay puisse être servi
+npm run watch          # terminal administrateur, AVANT de lancer le jeu
+```
+
+La boucle capture par morceaux de 45 s, lit chacun, et verse ce qu'elle a compris dans
+`public/data/observations.json`. Elle reprend là où la session précédente s'était arrêtée.
+Rien ne quitte la machine.
+
+Ce qu'elle apprend, et qui n'est **nulle part** dans le client :
+
+| | source | pourquoi le client ne l'a pas |
+|---|---|---|
+| espèces présentes sur une carte | paquets d'apparition | le client ne connaît que les tables de spawn, pas ce qui est là |
+| **nom localisé d'un monstre** | réponse du serveur | il ne l'envoie que si le client le demande — donc si tu le **survoles** |
+| objets tombés après une mort | paquets au sol | le serveur envoie ce qui tombe, jamais la probabilité |
+
+**Un taux observé n'est pas le taux officiel.** C'est un comptage : tant de fois l'objet, sur
+tant de morts. Le fichier garde toujours les deux nombres, jamais le seul pourcentage, et
+l'affichage prévient tant que les morts observées se comptent sur les doigts.
+
+**Surimpression toujours au-dessus.** L'écran *Surimpression* de l'app affiche en temps réel
+les espèces de la carte où tu es, cliquables pour voir leur butin. Le bouton « toujours
+au-dessus » ouvre une fenêtre d'incrustation Chrome, qui reste par-dessus le jeu sans outil
+externe ni droits d'administrateur — joue en **fenêtre sans bordure**, un plein écran exclusif
+passe devant tout, y compris elle.
+
 ### Relever l'encyclopédie en jeu
 
 C'est la source la plus fidèle à Zero Global : c'est celle du serveur lui-même.
@@ -295,9 +324,11 @@ tools/          chaîne d'extraction (Node, sans build)
   probe-grf.mjs diagnostic d'archive GRF
   dump-lua.mjs  décrit la structure d'un .lub, pour caler un parseur
   find.mjs      cherche un fichier dans le client, par motif sur le chemin
-  sniff.mjs     capture passive du trafic du jeu (pilote dumpcap/tshark)
+  sniff.mjs     capture passive du trafic du jeu (pktmon, dumpcap/tshark)
+  watch.mjs     capture en boucle, remplit la base, sert l'overlay
+  packets.mjs   découpe le trafic en paquets du jeu, en déduisant les longueurs
   pcap.mjs      lecture pcap/pcapng + réassemblage TCP
-  analyze-capture.mjs  déduit les tables de drop dans une capture
+  analyze-capture.mjs  lit une capture : paquets d'abord, statistique en filet
   icons.mjs     BMP → PNG
   import-drops.mjs
 src/            application React (Vite, TypeScript)

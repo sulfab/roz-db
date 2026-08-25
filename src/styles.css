@@ -200,3 +200,37 @@ table.grid tr:hover td { background: var(--panel-2); }
   main { padding: 16px; }
   .facts { grid-template-columns: 1fr; }
 }
+
+/* Surimpression : dense et lisible en petit, elle vit dans une fenetre de
+   380 px posee par-dessus le jeu. */
+
+.overlay-tete { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.overlay-tete .sous-titre { margin: 4px 0 0; color: var(--muted); }
+.overlay-tete button {
+  background: var(--accent-soft); color: var(--text); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 8px 12px; cursor: pointer; font: inherit; white-space: nowrap;
+}
+.overlay-tete button:hover { border-color: var(--accent); }
+
+.overlay-mobs { list-style: none; margin: 16px 0 0; padding: 0; }
+.overlay-mobs > li + li { margin-top: 4px; }
+.overlay-mobs > li > button {
+  width: 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  background: var(--panel); color: var(--text); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 8px 10px; cursor: pointer; font: inherit; text-align: left;
+}
+.overlay-mobs > li > button:hover { border-color: var(--accent); }
+.overlay-mobs > li > button.choisi { background: var(--panel-2); border-color: var(--accent); }
+.overlay-mobs .nom { font-weight: 600; }
+.overlay-mobs .chiffres { color: var(--muted); font-size: .9em; white-space: nowrap; }
+
+.overlay-butin { padding: 8px 10px 12px; background: var(--panel-2); border-radius: 0 0 var(--radius) var(--radius); }
+.overlay-butin h3 { margin: 8px 0 4px; font-size: .8em; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.overlay-butin ul { list-style: none; margin: 0; padding: 0; }
+.overlay-butin li { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+.overlay-butin .taux { color: var(--muted); white-space: nowrap; }
+.overlay-butin .avertissement { margin: 6px 0 0; color: var(--warn); font-size: .9em; }
+
+/* Une fois detachee, la fenetre n'a plus ni barre laterale ni marges d'ecran. */
+body.overlay-detache { padding: 10px; background: var(--bg); color: var(--text); }
+body.overlay-detache .overlay-mobs { margin-top: 0; }

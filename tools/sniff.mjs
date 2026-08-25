@@ -2,6 +2,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
 import { ROOT } from './client-path.mjs'
 
 /**
@@ -69,7 +70,7 @@ const works = (cmd, cmdArgs) => {
  * pktmon d'abord : il est deja la sur toute machine Windows recente, alors que
  * Wireshark demande une installation et un pilote de capture.
  */
-function findCaptureTool(preferred) {
+export function findCaptureTool(preferred) {
   const candidates = []
   if (process.platform === 'win32') {
     candidates.push({ kind: 'pktmon', cmd: 'pktmon', probe: ['help'] })
@@ -88,7 +89,7 @@ function findCaptureTool(preferred) {
 }
 
 /** Retrouve la connexion du jeu : le processus Ragnarok et son pair distant. */
-function findGameConnection() {
+export function findGameConnection() {
   try {
     if (process.platform === 'win32') {
       const tasks = run('tasklist', ['/FO', 'CSV', '/NH']).stdout || ''
@@ -126,7 +127,7 @@ function findGameConnection() {
  * gestionnaire de signal ne suffit pas a retenir Node, qui rend la main des que
  * sa boucle d'evenements est vide. Sans lui, la capture s'arretait aussitot.
  */
-function waitForStop(duration, onTick) {
+export function waitForStop(duration, onTick) {
   return new Promise((resolve) => {
     let done = false
     const tick = setInterval(() => onTick?.(), 2000)
@@ -158,7 +159,7 @@ function progressReporter(file) {
  * pcapng. Les options ont change entre les versions de Windows : on essaie la
  * forme recente puis l'ancienne plutot que d'exiger une version precise.
  */
-async function capturePktmon({ port, out, duration }) {
+export async function capturePktmon({ port, out, duration }) {
   const etl = out.replace(/\.pcapng$/i, '.etl')
   fs.mkdirSync(path.dirname(out), { recursive: true })
 
@@ -203,7 +204,7 @@ async function capturePktmon({ port, out, duration }) {
 }
 
 /** dumpcap, tshark et tcpdump partagent les memes options utiles. */
-async function captureWireshark(tool, { host, port, out, duration, iface }) {
+export async function captureWireshark(tool, { host, port, out, duration, iface }) {
   const filter = host && port ? `host ${host} and tcp port ${port}`
     : port ? `tcp port ${port}`
     : host ? `host ${host}`
@@ -299,4 +300,5 @@ async function main() {
   console.log(`Analyse :  npm run analyze -- "${file}"`)
 }
 
-main()
+// argv[1] est absent quand le module est importe, notamment par npm run watch.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()

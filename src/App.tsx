@@ -8,6 +8,7 @@ import { MobDetail } from './views/MobDetail'
 import { MapDetail } from './views/MapDetail'
 import { ItemsView, MobsView, MapsView } from './views/Lists'
 import { DataView } from './views/DataView'
+import { Overlay } from './views/Overlay'
 
 export function App() {
   const [db, setDb] = useState<Db | null>(null)
@@ -27,7 +28,7 @@ export function App() {
     <div className="app">
       <Sidebar db={db} route={route} />
       <main>
-        {empty && route.name !== 'data' ? (
+        {empty && route.name !== 'data' && route.name !== 'overlay' ? (
           <div className="detail">
             <h1>Aucune donnée</h1>
             <Empty>
@@ -53,6 +54,7 @@ function Content({ db, route }: { db: Db; route: ReturnType<typeof useRoute> }) 
     case 'mobs': return <MobsView db={db} query={route.query} />
     case 'maps': return <MapsView db={db} query={route.query} />
     case 'data': return <DataView db={db} />
+    case 'overlay': return <Overlay db={db} />
     default: return <Home db={db} />
   }
 }
@@ -81,6 +83,11 @@ function Sidebar({ db, route }: { db: Db; route: ReturnType<typeof useRoute> }) 
             </a>
           </li>
         ))}
+        <li>
+          <a href={href({ name: 'overlay' })} className={route.name === 'overlay' ? 'active' : ''}>
+            Surimpression
+          </a>
+        </li>
         <li>
           <a href={href({ name: 'data' })} className={route.name === 'data' ? 'active' : ''}>
             Données

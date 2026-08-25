@@ -17,7 +17,8 @@
     "analyze": "node tools/analyze-capture.mjs",
     "extract": "node tools/extract.mjs",
     "icons": "node tools/icons.mjs",
-    "import-drops": "node tools/import-drops.mjs"
+    "import-drops": "node tools/import-drops.mjs",
+    "watch": "node tools/watch.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",
