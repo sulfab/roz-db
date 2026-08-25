@@ -54,6 +54,27 @@ est branchée.
 
 ## Tables de drop
 
+Le client Global ne les contient pas, et le serveur n'envoie jamais de probabilité — il envoie
+ce qui tombe. Trois sources, donc, et l'app les garde **séparées** plutôt que fondues :
+
+| source | comment | ce que ça vaut |
+|---|---|---|
+| observation (`npm run watch`) | compte tes kills et ce qui en tombe | juste pour **ton** serveur, mais lent à converger |
+| client TW RO Zero | ses `.lub` contiennent les tables, contrairement au Global | complet, mais TW ≠ Global |
+| base publique en JSON | `npm run import-external` | dépend de qui l'a compilée |
+
+Les bases fan-made (RagnarokZero.net, Midgard Hub) annoncent toutes la même origine : le client
+**TW RO Zero**, en excluant explicitement les données kRO / iRO. C'est pourquoi importer un
+`mob_db` de rAthena serait une erreur : mauvaise lignée.
+
+`npm run import-external -- fichier.json` ne suppose aucun nom de champ. Chaque base a les siens
+et ils changent ; coder ceux d'aujourd'hui, c'est casser demain sans s'en apercevoir. L'outil
+cherche la **forme** — un objet portant un identifiant de monstre du client, et une liste dont
+les éléments portent un identifiant d'objet du client — puis retient les noms de champs qui
+reviennent le plus souvent. L'échelle des taux se déduit de leur ordre de grandeur. Essai à
+blanc par défaut : `--ecrire` pour remplacer vraiment la table.
+
+
 N'importe quelle source se ramène à des triplets `(mob, item, taux)` :
 
 ```bash

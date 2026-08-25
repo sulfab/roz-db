@@ -19,7 +19,8 @@
     "icons": "node tools/icons.mjs",
     "import-drops": "node tools/import-drops.mjs",
     "watch": "node tools/watch.mjs",
-    "hunt": "node tools/hunt-drops.mjs"
+    "hunt": "node tools/hunt-drops.mjs",
+    "import-external": "node tools/import-external.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",
