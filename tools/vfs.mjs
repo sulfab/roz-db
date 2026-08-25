@@ -144,11 +144,17 @@ export class Vfs {
    * Liste tous les chemins connus (GRF + dossier data/) matchant un predicat
    * applique au chemin en octets bruts minuscules.
    */
-  list(predicate) {
+  list(predicate, { partout = false } = {}) {
     const seen = new Map()
+    // `partout` rend chaque exemplaire, archive par archive, au lieu du seul
+    // que le client lira. C'est ce qu'il faut pour repondre a "ce fichier
+    // existe-t-il ailleurs, en une autre langue ?" — la priorite masque les
+    // autres exemplaires, et c'est justement eux qu'on cherche.
+    const cle = (entry, archive) => (partout ? `${archive}::${entry.key}` : entry.key)
     for (const { grf, name } of this.grfs) {
       for (const entry of grf.list(predicate)) {
-        if (!seen.has(entry.key)) seen.set(entry.key, { key: entry.key, name: entry.name, size: entry.size, from: name })
+        const k = cle(entry, name)
+        if (!seen.has(k)) seen.set(k, { key: entry.key, name: entry.name, size: entry.size, from: name })
       }
     }
     if (this.looseDir) {
@@ -159,7 +165,9 @@ export class Vfs {
           else {
             const key = `data/${rel}`.toLowerCase()
             if (!predicate || predicate(key)) {
-              seen.set(key, { key, name: `data/${rel}`, size: fs.statSync(path.join(dir, item.name)).size, from: 'data/' })
+              seen.set(cle({ key }, 'data/'), {
+                key, name: `data/${rel}`, size: fs.statSync(path.join(dir, item.name)).size, from: 'data/',
+              })
             }
           }
         }

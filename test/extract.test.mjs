@@ -365,3 +365,23 @@ test('noms de cartes : la variante localisee se superpose, sans perdre le reste'
   assert.ok(meta.sources.includes('data/mapnametable_frfr.txt'), meta.sources.join(' | '))
   assert.ok(meta.sources.includes('data/mapnametable.txt'), meta.sources.join(' | '))
 })
+
+test('list --partout rend chaque exemplaire, archive par archive', async () => {
+  // La priorite du client masque les autres exemplaires d'un meme chemin.
+  // C'est justement eux qu'on cherche quand on demande "ce fichier existe-t-il
+  // ailleurs, en une autre langue ?".
+  const vfs = {
+    grfs: [
+      { name: 'a.grf', grf: { list: () => [{ key: 'data/x.lub', name: 'data/x.lub', size: 10 }] } },
+      { name: 'b.grf', grf: { list: () => [{ key: 'data/x.lub', name: 'data/x.lub', size: 20 }] } },
+    ],
+    looseDir: null,
+  }
+  const { Vfs } = await import('../tools/vfs.mjs')
+  const liste = Vfs.prototype.list.bind(vfs)
+  assert.equal(liste(null).length, 1, 'par defaut, seul l exemplaire lu par le client')
+  const partout = liste(null, { partout: true })
+  assert.equal(partout.length, 2)
+  assert.deepEqual(partout.map((f) => f.from), ['a.grf', 'b.grf'])
+  assert.deepEqual(partout.map((f) => f.size), [10, 20])
+})

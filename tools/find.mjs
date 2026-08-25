@@ -20,6 +20,7 @@ Options
   -c, --client <dossier>  racine du client (defaut : celui memorise)
   -n, --top <n>           nombre de resultats             (defaut : 30)
       --all               ne trie pas par taille, trie par chemin
+      --partout           montre chaque exemplaire, archive par archive
 `
 
 function parseArgs(argv) {
@@ -29,6 +30,7 @@ function parseArgs(argv) {
     if (a === '--client' || a === '-c') args.client = argv[++i]
     else if (a === '--top' || a === '-n') args.top = Number(argv[++i])
     else if (a === '--all') args.all = true
+    else if (a === '--partout') args.partout = true
     else if (a === '--help' || a === '-h') args.help = true
     else args.patterns.push(a)
   }
@@ -56,15 +58,18 @@ function main() {
 
   const vfs = openClient(clientDir, { encoding: 'cp949' })
   const needles = args.patterns.map((p) => p.toLowerCase())
-  const hits = vfs.list((key) => needles.every((n) => key.includes(n)))
+  const hits = vfs.list((key) => needles.every((n) => key.includes(n)), { partout: args.partout })
 
   hits.sort(args.all
     ? (a, b) => a.key.localeCompare(b.key)
     : (a, b) => b.size - a.size)
 
   console.log(`${hits.length} fichier(s) pour ${args.patterns.map((p) => `"${p}"`).join(' + ')}\n`)
+  // D'ou vient le fichier compte autant que son nom : le client lit le premier
+  // exemplaire selon DATA.INI, et les autres restent invisibles sans cela.
   for (const hit of hits.slice(0, args.top)) {
     console.log(`  ${human(hit.size).padStart(8)}  ${hit.name}`)
+    console.log(`            ${hit.from}`)
   }
   if (hits.length > args.top) console.log(`\n  ... et ${hits.length - args.top} autres (--top pour en voir plus)`)
 
