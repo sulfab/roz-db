@@ -347,3 +347,12 @@ test('aucune variante lisible : on le dit, au lieu d afficher du coreen sans pre
   assert.match(items['501'].name, /고밀도/)
   assert.ok(meta.warnings.some((w) => /alphabet non latin/.test(w)), meta.warnings.join(' | '))
 })
+
+test('noms de cartes : la variante lisible est preferee a l originale', () => {
+  const client = makeFakeClient(tmpdir())
+  const out = path.join(tmpdir(), 'data')
+  const { maps, meta } = runExtract(client, out)
+
+  assert.equal(maps['prt_fild08'].name, 'Prontera Field 8')
+  assert.ok(meta.sources.includes('data/mapnametable_frfr.txt'), meta.sources.join(' | '))
+})

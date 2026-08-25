@@ -9,7 +9,7 @@ import { extractMobs, prettifySprite } from './parsers/mobs.mjs'
 import { extractSpawns } from './parsers/navi.mjs'
 
 import { resolveClientDir, ROOT } from './client-path.mjs'
-import { isReadableName } from './text.mjs'
+import { isReadableName, readableRatio } from './text.mjs'
 
 function parseArgs(argv) {
   const args = { out: path.join(ROOT, 'public', 'data'), encoding: 'auto', language: 'frfr' }
@@ -41,10 +41,28 @@ Options
   -v, --verbose            detaille les archives lues
 `
 
-function extractMapNames(vfs, encoding) {
-  const buf = vfs.read('data/mapnametable.txt')
-  if (!buf) return { names: new Map(), source: null }
-  return { names: parseMapNameTable(decode(buf, encoding)), source: 'data/mapnametable.txt' }
+/**
+ * Noms de cartes. Le client livre la table d'origine et des variantes
+ * localisees : on prend la premiere qui donne des noms lisibles, sans se fier
+ * au seul suffixe — `navi_mob_frfr.lub` contient du coreen malgre le sien.
+ */
+function extractMapNames(vfs, encoding, language) {
+  const candidates = [
+    `data/mapnametable_${language}.txt`,
+    'data/mapnametable_enus.txt',
+    'data/mapnametable.txt',
+  ]
+
+  let fallback = null
+  for (const path of candidates) {
+    const buf = vfs.read(path)
+    if (!buf) continue
+    const names = parseMapNameTable(decode(buf, encoding))
+    if (!names.size) continue
+    if (readableRatio([...names.values()]) >= 0.5) return { names, source: path }
+    fallback ||= { names, source: path }
+  }
+  return fallback || { names: new Map(), source: null }
 }
 
 function writeJson(dir, name, value) {
@@ -79,7 +97,7 @@ async function main() {
   const sources = []
 
   // --- cartes -------------------------------------------------------------
-  const { names: mapNames, source: mapSource } = extractMapNames(vfs, args.encoding)
+  const { names: mapNames, source: mapSource } = extractMapNames(vfs, args.encoding, args.language)
   if (mapSource) sources.push(mapSource)
   else warnings.push('data/mapnametable.txt absent : les cartes n\'auront pas de nom lisible.')
 

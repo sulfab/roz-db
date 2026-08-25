@@ -267,7 +267,12 @@ Navi_MobDATA = {
     'data/luafiles514/lua files/navigation/navi_mob.lub': naviMob,
     'data/luafiles514/lua files/navigation/navi_mob_frfr.lub': naviFr,
     'data/luafiles514/lua files/navigation/navi_mob_kokr.lub': naviKr,
-    'data/mapnametable.txt': mapNames,
+    // Le client livre la table d'origine, en coreen, et une variante localisee.
+    'data/mapnametable.txt': mapNames.replace(
+      /#([^#]+)#/g,
+      (_, name) => `#${name.replace(/[A-Za-z]/g, '가')}#`
+    ),
+    'data/mapnametable_frfr.txt': mapNames,
     'data/idnum2itemdisplaynametable.txt': '501#Red Potion#\n909#Jellopy#\n1202#Knife#\n4001#Poring Card#\n2104#Guard#\n',
     'data/idnum2itemresnametable.txt': '501#red_potion#\n909#jellopy#\n2104#guard#\n',
     'data/itemslotcounttable.txt': '1202#3#\n2104#1#\n',

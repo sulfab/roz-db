@@ -152,7 +152,10 @@ test('GRF 0x300 : le client complet passe par la chaine d extraction', () => {
   const vfs = openClient(dir)
   assert.deepEqual(vfs.errors, [])
   assert.equal(vfs.grfs[0].grf.version, 0x300)
-  assert.match(vfs.readText('data/mapnametable.txt'), /Prontera Field 8/)
+  // La table d'origine est en coreen, la variante localisee en clair : les deux
+  // doivent traverser l'archive sans dommage.
+  assert.match(vfs.readText('data/mapnametable_frfr.txt'), /Prontera Field 8/)
+  assert.match(vfs.readText('data/mapnametable.txt'), /가/)
   assert.match(vfs.readText('System/itemInfo.lub'), /Red Potion/)
   vfs.close()
 })

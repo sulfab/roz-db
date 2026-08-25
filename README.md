@@ -36,11 +36,16 @@ dès la première commande qui le reçoit : `npm run extract` seul suffit ensuit
 | Noms, descriptions, slots des items | `System/itemInfo*.lub` + `data/idnum2item*table.txt` | dans le client |
 | Icônes des items | `data/texture/…/item/<res>.bmp` | dans le client |
 | Ids et sprites des mobs | `datainfo/npcidentity.lub`, `datainfo/jobname.lub` | dans le client |
-| Noms des cartes | `data/mapnametable.txt` | dans le client |
+| Noms des cartes | `data/mapnametable_<langue>.txt` | dans le client |
 | Mob → carte | `navigation/navi_mob*.lub`, joint par le sprite | dans le client |
 | Population et niveau des mobs | selon le client — souvent absents | variable |
+| **Libellés d'items localisés** | — | **absents** |
 | **Tables de drop et taux** | — | **absentes** |
 | Stats des mobs (HP, race, élément) | — | **absentes** |
+
+Sur Ragnarok Zero, la seule base d'items du client (`datainfo/iteminfo.lub`, 3,3 Mo) est en
+coréen, et aucune variante localisée n'existe — vérifié en listant les 127 fichiers `_frfr`
+du client. Les libellés français ou anglais viennent donc du serveur, comme les drops.
 
 Dans le RO officiel, les drops et les stats sont côté serveur : l'encyclopédie en jeu les
 reçoit par paquet, elle ne les lit pas sur le disque. L'app fonctionne entièrement sans
@@ -153,9 +158,11 @@ lignes dont le sprite est inconnu sont comptées et signalées, jamais perdues e
 Quand la population n'est pas dans le client, l'app affiche **présent** et non un nombre :
 inventer un `1` le ferait passer pour une mesure.
 
-**La langue prime sur la taille.** Les fichiers de données existent souvent en plusieurs
+**La langue prime sur la taille**, et le suffixe ne suffit pas. Les fichiers de données existent souvent en plusieurs
 langues, suffixées (`_frfr`, `_enus`, `_kokr`) ; la version sans suffixe est l'originale, en
-coréen. Pour les items comme pour les mobs, l'extraction essaie d'abord la langue demandée
+coréen — mais un suffixe ne garantit rien : `navi_mob_frfr.lub` contient du coréen. C'est
+donc le contenu qui tranche. Pour les items, les mobs et les cartes, l'extraction essaie
+d'abord la langue demandée
 (`--language`, `frfr` par défaut), puis l'anglais. Et elle mesure la part de libellés en
 alphabet latin : une table lisible passe devant une table plus fournie mais illisible. Quand
 aucune variante lisible n'existe, c'est dit — pas affiché en silence.
@@ -212,7 +219,7 @@ pour caler le parseur sans deviner.
 ## Développement
 
 ```bash
-npm test          # 69 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
+npm test          # 70 tests : lecteur GRF, parseur Lua, parsers, extraction bout en bout
 npm run build     # typecheck + build statique
 ```
 
