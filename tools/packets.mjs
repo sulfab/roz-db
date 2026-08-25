@@ -746,3 +746,81 @@ export function lastAttacker(coups, cible, avant) {
   }
   return source
 }
+
+/**
+ * Cherche une fiche d'encyclopedie dans un paquet.
+ *
+ * Un taux de drop ne s'observe pas : les valeurs des tables reelles sont des
+ * entiers ronds sur dix-mille — 7000, 500, 20, 1. Une carte a 1/10000 demande
+ * des centaines de milliers de morts pour etre seulement approchee. Ces
+ * chiffres viennent donc d'une table, jamais d'un comptage.
+ *
+ * Si le jeu a une encyclopedie des monstres, le serveur envoie cette table
+ * quand on l'ouvre. C'est le seul endroit ou elle passe en clair, et pour le
+ * bon serveur — le sien, pas celui d'une autre region.
+ *
+ * On la reconnait a sa forme, sans connaitre le numero du paquet : un
+ * identifiant de monstre connu, puis des objets connus a intervalle regulier,
+ * chacun accompagne d'un nombre qui peut etre un taux.
+ */
+const TAUX_MAXIMUM = 10000
+const MIN_LIGNES = 3
+
+export function inferEncyclopedia(packets, oracle, { minLignes = MIN_LIGNES } = {}) {
+  if (!oracle?.items?.size || !oracle?.mobs?.size) return []
+
+  const trouve = []
+  for (const p of packets) {
+    const data = p.payload
+    if (data.length < 16) continue
+
+    for (let debut = 0; debut + 2 <= data.length; debut++) {
+      const mob = data.readUInt16LE(debut)
+      if (!oracle.mobs.has(mob)) continue
+
+      for (let pas = 4; pas <= 24; pas += 2) {
+        for (let at = debut + 2; at + pas <= data.length; at += 2) {
+          const lignes = lireLignes(data, at, pas, oracle.items)
+          if (lignes.length < minLignes) continue
+          const taux = champTaux(data, at, pas, lignes.length)
+          trouve.push({ offset: p.offset, opcode: p.opcode, mob, pas, lignes, taux })
+          break
+        }
+      }
+    }
+  }
+  return trouve
+}
+
+/** Objets connus a intervalle regulier, tant que ca dure. */
+function lireLignes(data, at, pas, items) {
+  const lignes = []
+  for (let p = at; p + 2 <= data.length; p += pas) {
+    const item = data.readUInt16LE(p)
+    if (!items.has(item)) break
+    lignes.push({ offset: p, item })
+  }
+  return lignes
+}
+
+/**
+ * Ou est le taux dans la ligne.
+ *
+ * On ne le suppose pas : on retient la position dont toutes les valeurs
+ * tiennent dans l'echelle d'un taux et ne sont pas toutes identiques. Un champ
+ * constant est un drapeau, pas une probabilite.
+ */
+function champTaux(data, at, pas, nombre) {
+  for (let decalage = 2; decalage + 2 <= pas; decalage += 2) {
+    const valeurs = []
+    for (let i = 0; i < nombre; i++) {
+      const p = at + i * pas + decalage
+      if (p + 2 > data.length) return null
+      valeurs.push(data.readUInt16LE(p))
+    }
+    if (valeurs.some((v) => v === 0 || v > TAUX_MAXIMUM)) continue
+    if (new Set(valeurs).size < 2) continue
+    return { decalage, valeurs }
+  }
+  return null
+}

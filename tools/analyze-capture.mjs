@@ -5,6 +5,7 @@ import path from 'node:path'
 import { loadFlows, looksTls } from './pcap.mjs'
 import {
   frameStream, readEntries, inferClassOffset, inferGroundItems, readGroundItem, trailingName,
+  inferEncyclopedia,
 } from './packets.mjs'
 import { ROOT } from './client-path.mjs'
 
@@ -361,6 +362,23 @@ function reportPackets(flow, oracle) {
   }
   if (noms.size) {
     console.log(`  ${noms.size} nom(s) lus en clair : ${[...noms.values()].slice(0, 8).join(', ')}`)
+  }
+
+  // L'encyclopedie d'abord : c'est la seule chose du flux qui porte de vrais
+  // taux, et pour le bon serveur. Tout le reste n'est que comptage.
+  const fiches = inferEncyclopedia(framed.packets, oracle)
+  if (fiches.length) {
+    console.log(`  ${fiches.length} fiche(s) d'encyclopedie — des taux annonces, pas observes :`)
+    for (const fiche of fiches.slice(0, 4)) {
+      console.log(`      paquet 0x${fiche.opcode.toString(16).padStart(4, '0')}, ` +
+        `monstre ${fiche.mob} ${oracle.mobNames?.get(fiche.mob) || ''}`.trimEnd())
+      fiche.lignes.forEach((ligne, i) => {
+        const brut = fiche.taux ? fiche.taux.valeurs[i] : null
+        console.log(`        ${String(ligne.item).padStart(6)} ${oracle.itemNames?.get(ligne.item) || ''}`.trimEnd() +
+          (brut === null ? '' : `   ${(brut / 100).toFixed(2)} %  (brut ${brut})`))
+      })
+    }
+    console.log('      Ouvre l\'encyclopedie sur d\'autres monstres pour completer la table.')
   }
 
   const formes = inferGroundItems(framed.packets, oracle.items, {

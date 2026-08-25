@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import {
   LONGUEURS, VARIABLES, frameStream, framePackets, inferLength,
   readEntries, inferClassOffset, inferItemPackets, trailingName,
-  readNameReplies, readMapChanges, inferGroundItems,
+  readNameReplies, readMapChanges, inferEncyclopedia, inferGroundItems,
 } from '../tools/packets.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -316,4 +316,30 @@ test('un objet au sol survit au meme filtre', () => {
   assert.equal(found.length, 1)
   assert.equal(found[0].opcode, 0x009d)
   assert.equal(found[0].offset, 4)
+})
+
+test('une fiche d encyclopedie se reconnait a sa forme', () => {
+  // Monstre, puis des objets a pas constant, chacun suivi de son taux.
+  const oracle = { mobs: new Set([1002]), items: new Set([909, 501, 4001, 1202]) }
+  const body = Buffer.alloc(40)
+  body.writeUInt16LE(1002, 0)
+  const drops = [[909, 7000], [501, 1000], [4001, 1], [1202, 500]]
+  drops.forEach(([item, taux], i) => {
+    body.writeUInt16LE(item, 2 + i * 4)
+    body.writeUInt16LE(taux, 4 + i * 4)
+  })
+  const { packets } = framePackets(build([{ opcode: 0x0b6a, body }]), 0, new Map([[0x0b6a, 42]]))
+  const fiches = inferEncyclopedia(packets, oracle)
+  assert.ok(fiches.length, 'aucune fiche reconnue')
+  const fiche = fiches.find((f) => f.lignes.length === 4)
+  assert.ok(fiche, 'les quatre lignes doivent ressortir')
+  assert.equal(fiche.mob, 1002)
+  assert.deepEqual(fiche.lignes.map((l) => l.item), [909, 501, 4001, 1202])
+  assert.deepEqual(fiche.taux.valeurs, [7000, 1000, 1, 500])
+})
+
+test('sans oracle, aucune fiche n est inventee', () => {
+  const body = Buffer.alloc(40, 7)
+  const { packets } = framePackets(build([{ opcode: 0x0b6a, body }]), 0, new Map([[0x0b6a, 42]]))
+  assert.deepEqual(inferEncyclopedia(packets, { items: new Set(), mobs: new Set() }), [])
 })
