@@ -3,7 +3,9 @@ import fs from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'
 import { loadFlows, looksTls } from './pcap.mjs'
-import { frameStream, readEntries, inferClassOffset, inferItemPackets, trailingName } from './packets.mjs'
+import {
+  frameStream, readEntries, inferClassOffset, inferGroundItems, readGroundItem, trailingName,
+} from './packets.mjs'
 import { ROOT } from './client-path.mjs'
 
 /**
@@ -71,7 +73,8 @@ export function loadOracle(dataDir = path.join(ROOT, 'public', 'data')) {
   // Les noms ne servent pas a reconnaitre : ils rendent lisible ce qu'on a
   // reconnu, quand on affiche les monstres croises dans la capture.
   const mobNames = new Map(Object.entries(mobTable).map(([id, m]) => [Number(id), m?.nom || m?.name]))
-  return { items, mobs, mobNames }
+  const itemNames = new Map(Object.entries(itemTable).map(([id, i]) => [Number(id), i?.nom || i?.name]))
+  return { items, mobs, mobNames, itemNames }
 }
 
 const readers = [
@@ -335,17 +338,24 @@ function reportPackets(flow, oracle) {
     console.log(`  ${noms.size} nom(s) lus en clair : ${[...noms.values()].slice(0, 8).join(', ')}`)
   }
 
-  const drops = inferItemPackets(framed.packets, oracle.items)
-  if (drops.length) {
-    console.log("  Paquets portant des identifiants d'objets :")
-    for (const d of drops.slice(0, 6)) {
-      console.log(`      paquet 0x${d.opcode.toString(16).padStart(4, '0')} ` +
-        `objet a +${d.offset} sur ${d.size * 8} bits, ${d.count} occurrence(s) : ` +
-        d.items.slice(0, 6).join(', '))
+  const formes = inferGroundItems(framed.packets, oracle.items, {
+    entityIds: new Set(entries.map((e) => e.aid)),
+  })
+  if (formes.length) {
+    console.log('  Objets tombes au sol :')
+    for (const forme of formes.slice(0, 4)) {
+      const tombes = framed.packets.map((p) => readGroundItem(p, forme)).filter(Boolean)
+      console.log(`      paquet 0x${forme.opcode.toString(16).padStart(4, '0')}, objet a ` +
+        `+${forme.offset} sur ${forme.size * 8} bits — reconnu par les ${forme.paires} ` +
+        `identifiants qu'il partage avec le paquet de ramassage ` +
+        `0x${forme.retrait.toString(16).padStart(4, '0')}`)
+      for (const objet of tombes.slice(0, 8)) {
+        console.log(`        ${String(objet.item).padStart(6)}  ${oracle.itemNames?.get(objet.item) || ''}`)
+      }
     }
   } else {
-    console.log("  Aucun paquet ne porte d'identifiant d'objet : rien n'est tombe au sol " +
-      'pendant la capture, ou elle est trop courte.')
+    console.log("  Aucun objet au sol : rien n'est tombe pendant la capture, ou elle est " +
+      'trop courte pour que le va-et-vient chute/ramassage se voie.')
   }
 }
 

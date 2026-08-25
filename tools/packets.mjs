@@ -547,3 +547,97 @@ export function readVanishings(packets, mobIds) {
   }
   return events
 }
+
+/**
+ * Trouve le paquet qui annonce un objet tombe au sol.
+ *
+ * La premiere approche cherchait un champ contenant toujours un identifiant
+ * d'objet connu. C'est trop faible : les identifiants d'objets couvrent une
+ * part enorme des petits nombres, et le calcul de hasard qui protegeait de ca
+ * rejetait du meme coup les vrais paquets, qui ne portent que deux ou trois
+ * objets differents sur une courte capture.
+ *
+ * La preuve est ailleurs, et elle est structurelle : un objet pose au sol
+ * recoit un identifiant propre, et **ce meme identifiant reapparait** dans le
+ * paquet qui l'enleve quand on le ramasse. Deux numeros de paquets differents
+ * qui partagent des identifiants exacts sur trente-deux bits, ce n'est pas un
+ * hasard qu'on ait a chiffrer.
+ */
+const MIN_PAIRES = 2
+const MIN_OBJETS_DISTINCTS = 2
+
+export function inferGroundItems(packets, knownItemIds, { minPaires = MIN_PAIRES, entityIds = null } = {}) {
+  if (!knownItemIds?.size) return []
+
+  const parOpcode = new Map()
+  for (const p of packets) {
+    if (p.payload.length < 4) continue
+    if (!parOpcode.has(p.opcode)) parOpcode.set(p.opcode, [])
+    parOpcode.get(p.opcode).push(p)
+  }
+
+  const identifiants = new Map()
+  for (const [opcode, group] of parOpcode) {
+    identifiants.set(opcode, new Set(group.map((p) => p.payload.readUInt32LE(0))))
+  }
+
+  const found = []
+  for (const [opcode, group] of parOpcode) {
+    const width = Math.min(...group.map((p) => p.payload.length))
+    if (width < 8) continue   // il faut la place d'un identifiant et d'un objet
+
+    // Le va-et-vient ne suffit pas : les paquets de degats partagent eux aussi
+    // leurs identifiants avec celui des disparitions, puisque ce sont les memes
+    // creatures. Ce qui les separe est ailleurs, et c'est net — un objet au sol
+    // n'est jamais une entite qui apparait. Son identifiant ne figure donc dans
+    // aucun paquet d'apparition, la ou celui d'un combattant y figure toujours.
+    if (entityIds?.size) {
+      const communs = [...identifiants.get(opcode)].filter((id) => entityIds.has(id))
+      if (communs.length) continue
+    }
+
+    // Le paquet d'enlevement ne porte guere plus que l'identifiant.
+    let retrait = null
+    for (const [autre, ids] of identifiants) {
+      if (autre === opcode) continue
+      const partages = [...identifiants.get(opcode)].filter((id) => ids.has(id))
+      if (partages.length < minPaires) continue
+      if (!retrait || partages.length > retrait.partages) {
+        retrait = { opcode: autre, partages: partages.length }
+      }
+    }
+    if (!retrait) continue
+
+    for (let off = 4; off + 2 <= width; off++) {
+      for (const size of [2, 4]) {
+        if (off + size > width) continue
+        const read = (p) => (size === 2 ? p.payload.readUInt16LE(off) : p.payload.readUInt32LE(off))
+        if (!group.every((p) => knownItemIds.has(read(p)))) continue
+        const distincts = new Set(group.map(read))
+        if (distincts.size < MIN_OBJETS_DISTINCTS) continue
+        if (size === 4 && found.some((f) => f.opcode === opcode && f.offset === off)) continue
+        found.push({
+          opcode, offset: off, size,
+          retrait: retrait.opcode,
+          paires: retrait.partages,
+          count: group.length,
+          items: [...distincts],
+        })
+      }
+    }
+  }
+  return found
+}
+
+/** Lit un objet au sol dans un paquet, une fois sa forme connue. */
+export function readGroundItem(packet, forme) {
+  if (packet.opcode !== forme.opcode) return null
+  if (packet.payload.length < forme.offset + forme.size) return null
+  return {
+    sol: packet.payload.readUInt32LE(0),
+    item: forme.size === 2
+      ? packet.payload.readUInt16LE(forme.offset)
+      : packet.payload.readUInt32LE(forme.offset),
+    offset: packet.offset,
+  }
+}

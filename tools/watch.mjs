@@ -8,7 +8,7 @@ import { ROOT } from './client-path.mjs'
 import { findCaptureTool, findGameConnection, capturePktmon, captureWireshark } from './sniff.mjs'
 import { loadFlows, looksTls } from './pcap.mjs'
 import {
-  frameStream, readEntries, inferClassOffset, inferItemPackets,
+  frameStream, readEntries, inferClassOffset, inferGroundItems, readGroundItem,
   readNameReplies, readMapChanges, readVanishings,
 } from './packets.mjs'
 
@@ -172,38 +172,68 @@ export function observeStream(data, oracle) {
   }
 
   const morts = readVanishings(framed.packets, new Set(classeDe.keys()))
+
+  // Objets au sol : on reconnait le paquet a sa forme, pas a son numero — un
+  // objet pose recoit un identifiant propre, qui reapparait dans le paquet qui
+  // l'enleve quand on le ramasse.
+  const formes = inferGroundItems(framed.packets, oracle.items, {
+    entityIds: new Set(entries.map((e) => e.aid)),
+  })
+  const tombes = []
+  for (const forme of formes) {
+    out.pistes.push({ opcode: forme.opcode, offset: forme.offset, size: forme.size })
+    for (const p of framed.packets) {
+      const objet = readGroundItem(p, forme)
+      if (objet) tombes.push(objet)
+    }
+  }
+
+  // Toutes les disparitions ne sont pas des morts : une creature qui sort du
+  // champ de vision disparait aussi. L'octet qui les distingue existe, mais sa
+  // valeur n'est ecrite nulle part — on la deduit de celles qui sont suivies
+  // d'un objet au sol, puisqu'un objet ne tombe que d'un monstre mort.
+  const raison = inferRaisonMort(morts, tombes, framed.packets)
+  out.raisonMort = raison
   for (const m of morts) {
+    if (raison !== null && m.reason !== raison) continue
     const cls = classeDe.get(m.id)
     if (cls) out.morts.set(cls, (out.morts.get(cls) || 0) + 1)
   }
 
-  // Objets tombes : on ne sait pas encore quel paquet les annonce, donc on
-  // garde les pistes et on ne les croit qu'apres plusieurs morceaux.
-  const pistes = inferItemPackets(framed.packets, oracle.items)
-  for (const piste of pistes) {
-    out.pistes.push({ opcode: piste.opcode, offset: piste.offset, size: piste.size })
-  }
-
   // Rattachement d'un objet a l'espece morte juste avant : c'est la seule facon
   // d'obtenir un taux, faute que le serveur envoie jamais la moindre probabilite.
-  const parOffset = [...morts].sort((a, b) => a.offset - b.offset)
-  for (const piste of pistes) {
-    for (const p of framed.packets) {
-      if (p.opcode !== piste.opcode || p.payload.length < piste.offset + piste.size) continue
-      const objet = piste.size === 2
-        ? p.payload.readUInt16LE(piste.offset)
-        : p.payload.readUInt32LE(piste.offset)
-      if (!oracle.items.has(objet)) continue
-      const mort = derniereMortAvant(parOffset, p.offset, framed.packets)
-      const cls = mort && classeDe.get(mort.id)
-      if (!cls) continue
-      if (!out.drops.has(cls)) out.drops.set(cls, new Map())
-      const table = out.drops.get(cls)
-      table.set(objet, (table.get(objet) || 0) + 1)
-    }
+  const parOffset = morts
+    .filter((m) => raison === null || m.reason === raison)
+    .sort((a, b) => a.offset - b.offset)
+  for (const objet of tombes) {
+    const mort = derniereMortAvant(parOffset, objet.offset, framed.packets)
+    const cls = mort && classeDe.get(mort.id)
+    if (!cls) continue
+    if (!out.drops.has(cls)) out.drops.set(cls, new Map())
+    const table = out.drops.get(cls)
+    table.set(objet.item, (table.get(objet.item) || 0) + 1)
   }
 
   return out
+}
+
+/**
+ * Quelle valeur de l'octet de disparition designe une mort.
+ *
+ * On regarde celles qui sont suivies de pres par un objet au sol : un objet ne
+ * tombe que d'une creature morte. Sans objet observe, on ne tranche pas — et
+ * l'appelant comptera toutes les disparitions, quitte a sous-estimer les taux
+ * plutot qu'a les gonfler.
+ */
+export function inferRaisonMort(morts, tombes, packets) {
+  const votes = new Map()
+  for (const objet of tombes) {
+    const mort = derniereMortAvant([...morts].sort((a, b) => a.offset - b.offset), objet.offset, packets)
+    if (mort) votes.set(mort.reason, (votes.get(mort.reason) || 0) + 1)
+  }
+  if (!votes.size) return null
+  const [gagnant] = [...votes].sort((a, b) => b[1] - a[1])
+  return gagnant[0]
 }
 
 /** La mort la plus proche avant cet octet, si elle est assez proche. */

@@ -43,10 +43,19 @@ const nom = (aid, texte) => fixe(OPCODE_NOM, LONGUEUR_NOM, (b) => {
   b.write(texte, 4, 'latin1')
 })
 
-const chute = (objet) => fixe(OPCODE_DROP, LONGUEUR_DROP, (b) => {
-  b.writeUInt32LE(9000, 0)
+/**
+ * Objet pose au sol : identifiant propre, puis l'objet.
+ *
+ * Le ramassage renvoie le meme identifiant : c'est ce va-et-vient qui prouve
+ * qu'on a affaire a un objet au sol, et non a un champ contenant par hasard un
+ * nombre valide. Un jeu de test sans ramassage ne testerait donc rien.
+ */
+const OPCODE_RAMASSE = 0x00a1
+const chute = (sol, objet) => fixe(OPCODE_DROP, LONGUEUR_DROP, (b) => {
+  b.writeUInt32LE(sol, 0)
   b.writeUInt16LE(objet, 6)
 })
+const ramasse = (sol) => fixe(OPCODE_RAMASSE, 6, (b) => b.writeUInt32LE(sol, 0))
 
 const carte = (nomCarte) => fixe(0x0091, 24, (b) => b.write(`${nomCarte}.gat`, 0, 'latin1'))
 
@@ -99,7 +108,8 @@ test('un objet tombe juste apres une mort est rattache a l espece', () => {
   const flux = Buffer.concat([
     entree({ aid: 5001, classe: 1280 }),
     disparition(5001),
-    chute(909), chute(501), chute(4001),
+    chute(9001, 909), chute(9002, 501), chute(9003, 4001),
+    ramasse(9001), ramasse(9002), ramasse(9003),
   ])
   const obs = observeStream(flux, ORACLE)
   assert.deepEqual([...obs.drops.get(1280).keys()].sort((a, b) => a - b), [501, 909, 4001])
@@ -107,7 +117,8 @@ test('un objet tombe juste apres une mort est rattache a l espece', () => {
 
 test('un objet tombe avant toute mort n est rattache a personne', () => {
   const flux = Buffer.concat([
-    chute(909), chute(501), chute(4001),
+    chute(9001, 909), chute(9002, 501), chute(9003, 4001),
+    ramasse(9001), ramasse(9002), ramasse(9003),
     entree({ aid: 5001, classe: 1280 }),
   ])
   assert.equal(observeStream(flux, ORACLE).drops.size, 0)
@@ -118,7 +129,8 @@ test('le cumul additionne les morceaux au lieu de les remplacer', () => {
     carte('prt_fild08'),
     entree({ aid: 5001, classe: 1280 }),
     disparition(5001),
-    chute(909), chute(501), chute(4001),
+    chute(9001, 909), chute(9002, 501), chute(9003, 4001),
+    ramasse(9001), ramasse(9002), ramasse(9003),
   ])
   const state = { version: 1, octets: 0, morceaux: 0, cartes: {}, mobs: {}, pistes: {}, objets: {} }
   mergeObservation(state, observeStream(morceau, ORACLE), ORACLE)

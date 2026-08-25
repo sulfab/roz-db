@@ -158,6 +158,21 @@ cherchant le seul décalage où toutes les apparitions tombent sur un monstre qu
 connaît — et l'outil dit combien de décalages le hasard produirait, pour qu'on sache quand
 ne pas le croire.
 
+**Les objets au sol se reconnaissent par un va-et-vient, pas par une statistique.**
+Chercher un champ contenant toujours un identifiant d'objet connu était trop faible : les
+identifiants couvrent une part énorme des petits nombres, et le calcul de hasard qui protégeait
+de ça rejetait du même coup les vrais paquets — une courte capture ne porte que deux ou trois
+objets différents. La preuve est ailleurs, et elle est structurelle : un objet posé au sol reçoit
+un identifiant propre, et **ce même identifiant reparaît** dans le paquet qui l'enlève quand on
+le ramasse. Deux numéros de paquets partageant des identifiants exacts sur 32 bits, ce n'est pas
+un hasard qu'on ait à chiffrer.
+
+Ça ne suffit pourtant pas : les paquets de dégâts partagent eux aussi leurs identifiants avec
+celui des disparitions, puisque ce sont les mêmes créatures. Ce qui les sépare est net — **un
+objet au sol n'est jamais une entité qui apparaît**. Son identifiant ne figure dans aucun paquet
+d'apparition, là où celui d'un combattant y figure toujours. Sur du trafic réel, ces deux règles
+ne laissent qu'un seul candidat.
+
 **Un oracle dense ne prouve rien.** Les identifiants d'objets s'étalent de 500 à 20 000 ;
 un champ qui ne contient jamais que de petits nombres tombe dans une zone où l'oracle est
 presque plein, et « c'est un objet connu » n'y apprend plus rien. C'est la densité **locale**,

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import {
   LONGUEURS, VARIABLES, frameStream, framePackets, inferLength,
   readEntries, inferClassOffset, inferItemPackets, trailingName,
-  readNameReplies, readMapChanges,
+  readNameReplies, readMapChanges, inferGroundItems,
 } from '../tools/packets.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -267,4 +267,53 @@ test('un champ de nom doit etre complete par des zeros', () => {
   const flux = build([{ opcode: 0x0adf, body }, { opcode: 0x0adf, body }])
   const { packets } = framePackets(flux, 0, new Map([[0x0adf, 34]]))
   assert.deepEqual(readNameReplies(packets), [])
+})
+
+test('un paquet de degats ne passe pas pour un objet au sol', () => {
+  // Les degats partagent leurs identifiants avec les disparitions — ce sont les
+  // memes creatures — et leur champ suivant peut tomber sur un objet valide.
+  // Ce qui les trahit : ces identifiants sont ceux d'entites apparues.
+  const oracle = new Set([546, 908, 959])
+  const degat = (source, valeur) => {
+    const body = Buffer.alloc(30)
+    body.writeUInt32LE(source, 0)
+    body.writeUInt16LE(valeur, 4)
+    return { opcode: 0x08c8, body }
+  }
+  const dispar = (id) => {
+    const body = Buffer.alloc(5)
+    body.writeUInt32LE(id, 0)
+    return { opcode: 0x0080, body }
+  }
+  const flux = build([
+    degat(3001, 546), degat(3002, 908), degat(3001, 959),
+    dispar(3001), dispar(3002),
+  ])
+  const { packets } = framePackets(flux, 0, new Map([[0x08c8, 32], [0x0080, 7]]))
+  assert.ok(inferGroundItems(packets, oracle).length, 'sans oracle d entites, rien ne les separe')
+  assert.deepEqual(inferGroundItems(packets, oracle, { entityIds: new Set([3001, 3002]) }), [])
+})
+
+test('un objet au sol survit au meme filtre', () => {
+  const oracle = new Set([908, 959])
+  const chute = (sol, objet) => {
+    const body = Buffer.alloc(13)
+    body.writeUInt32LE(sol, 0)
+    body.writeUInt32LE(objet, 4)
+    return { opcode: 0x009d, body }
+  }
+  const ramasse = (sol) => {
+    const body = Buffer.alloc(4)
+    body.writeUInt32LE(sol, 0)
+    return { opcode: 0x00a1, body }
+  }
+  const flux = build([
+    chute(40595, 908), chute(41774, 959), chute(43140, 908),
+    ramasse(40595), ramasse(41774),
+  ])
+  const { packets } = framePackets(flux, 0, new Map([[0x009d, 15], [0x00a1, 6]]))
+  const found = inferGroundItems(packets, oracle, { entityIds: new Set([3001, 3002]) })
+  assert.equal(found.length, 1)
+  assert.equal(found[0].opcode, 0x009d)
+  assert.equal(found[0].offset, 4)
 })
