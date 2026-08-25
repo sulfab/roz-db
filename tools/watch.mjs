@@ -40,6 +40,8 @@ Options
   -c, --chunk <s>     duree d'un morceau de capture   (defaut : 45)
   -p, --port <n>      port du serveur local           (defaut : 7355)
       --data <dir>    ou ecrire les observations      (defaut : public/data)
+      --brut <fichier> conserve le flux serveur brut, pour analyse ulterieure
+      --garder <dir>  conserve aussi les captures au lieu de les effacer
       --no-serve      ne pas ouvrir le serveur local
       --host <ip>     adresse du serveur de jeu
       --port-jeu <n>  port du serveur de jeu
@@ -63,6 +65,8 @@ function parseArgs(argv) {
     if (a === '--chunk' || a === '-c') args.chunk = Number(argv[++i])
     else if (a === '--port' || a === '-p') args.port = Number(argv[++i])
     else if (a === '--data') args.data = path.resolve(argv[++i])
+    else if (a === '--brut') args.brut = path.resolve(argv[++i])
+    else if (a === '--garder') args.garder = path.resolve(argv[++i])
     else if (a === '--no-serve') args.serve = false
     else if (a === '--host') args.host = argv[++i]
     else if (a === '--port-jeu') args.gamePort = Number(argv[++i])
@@ -377,7 +381,17 @@ async function main() {
     console.log('\nArret demande : le morceau en cours se termine, puis on enregistre.')
   })
 
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'roz-watch-'))
+  // Les morceaux vivent dans un dossier temporaire et disparaissent une fois
+  // lus : une session de plusieurs heures remplirait le disque autrement. Mais
+  // le flux du serveur, lui, peut etre conserve — c'est la seule matiere pour
+  // comprendre un paquet qu'on ne sait pas encore lire.
+  const tmp = args.garder || fs.mkdtempSync(path.join(os.tmpdir(), 'roz-watch-'))
+  fs.mkdirSync(tmp, { recursive: true })
+  if (args.brut) {
+    fs.mkdirSync(path.dirname(args.brut), { recursive: true })
+    console.log(`Flux brut : ${args.brut}`)
+  }
+
   let n = 0
   while (!stop) {
     const out = path.join(tmp, `chunk-${n++}.pcapng`)
@@ -392,11 +406,15 @@ async function main() {
 
     let flows = []
     try { flows = loadFlows(out) } catch (err) { console.error(`Lecture : ${err.message}`) }
-    fs.rmSync(out, { force: true })
+    if (!args.garder) fs.rmSync(out, { force: true })
 
     for (const flow of flows) {
       if (flow.isServerToClient === false || looksTls(flow.data)) continue
       state.octets += flow.bytes
+      // Les morceaux se suivent sans se raccorder : chacun commence au milieu
+      // d'un paquet. Le decoupage sait s'y recaler, donc les mettre bout a bout
+      // ne coute qu'un paquet perdu par morceau.
+      if (args.brut) fs.appendFileSync(args.brut, flow.data)
       mergeObservation(state, observeStream(flow.data, oracle), oracle)
     }
     saveState(stateFile, state)
@@ -411,8 +429,12 @@ async function main() {
 
   saveState(stateFile, state)
   site?.close()
-  fs.rmSync(tmp, { recursive: true, force: true })
+  if (!args.garder) fs.rmSync(tmp, { recursive: true, force: true })
   console.log(`\nEnregistre dans ${stateFile}`)
+  if (args.brut && fs.existsSync(args.brut)) {
+    console.log(`Flux brut  : ${args.brut} (${(fs.statSync(args.brut).size / 1024).toFixed(0)} ko)`)
+    console.log(`Analyse    : npm run analyze -- "${args.brut}"`)
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()

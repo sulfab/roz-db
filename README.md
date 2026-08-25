@@ -87,6 +87,15 @@ Ce qu'elle apprend, et qui n'est **nulle part** dans le client :
 | **nom localisé d'un monstre** | réponse du serveur | il ne l'envoie que si le client le demande — donc si tu le **survoles** |
 | objets tombés après une mort | paquets au sol | le serveur envoie ce qui tombe, jamais la probabilité |
 
+Les morceaux de capture vivent dans un dossier temporaire et disparaissent une fois lus —
+une session de plusieurs heures remplirait le disque sinon. Pour garder de quoi analyser un
+paquet qu'on ne sait pas encore lire :
+
+```bash
+npm run watch -- --brut captures/flux.bin    # le flux du serveur, bout à bout
+npm run analyze -- captures/flux.bin         # relecture hors ligne
+```
+
 **Un taux observé n'est pas le taux officiel.** C'est un comptage : tant de fois l'objet, sur
 tant de morts. Le fichier garde toujours les deux nombres, jamais le seul pourcentage, et
 l'affichage prévient tant que les morts observées se comptent sur les doigts.
