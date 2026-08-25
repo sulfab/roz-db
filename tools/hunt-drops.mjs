@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { openClient } from './vfs.mjs'
 import { resolveClientDir } from './client-path.mjs'
 import { loadLua } from './luadata.mjs'
-import { loadOracle, findDropTables } from './analyze-capture.mjs'
+import { loadOracle, findDropTables, oracleDensity, minimumRun } from './analyze-capture.mjs'
 
 /**
  * Cherche une table de drop dans tout le client, fichier par fichier.
@@ -37,6 +37,7 @@ Options
       --filtre <mot>      restreint aux chemins contenant ce mot
       --exe               inclut les .exe et .dll de la racine du client
       --min <n>           objets distincts minimum pour signaler  (defaut : 3)
+      --tout              fouille aussi les formats qui ne peuvent rien contenir
       --max-taille <mo>   ignore les fichiers plus gros           (defaut : 64)
       --data <dossier>    ou lire l'oracle          (defaut : public/data)
       --verbose           dit ce qu'il ouvre, y compris les echecs
@@ -54,6 +55,7 @@ function parseArgs(argv) {
     if (a === '--client' || a === '-c') args.client = argv[++i]
     else if (a === '--filtre') args.filtre = argv[++i].toLowerCase()
     else if (a === '--exe') args.exe = true
+    else if (a === '--tout') args.tout = true
     else if (a === '--min') args.min = Number(argv[++i])
     else if (a === '--max-taille') args.maxTaille = Number(argv[++i]) * 1024 * 1024
     else if (a === '--data') args.data = path.resolve(argv[++i])
@@ -131,6 +133,17 @@ export function huntTextLines(texte, oracle, { min = MIN_OBJETS } = {}) {
 const estLua = (p) => /\.(lub|lua)$/i.test(p)
 const estTexte = (p) => /\.(txt|csv|xml|json|ini|conf)$/i.test(p)
 
+/**
+ * Formats dont on sait ce qu'ils contiennent, et ou une table n'a rien a faire.
+ *
+ * Ce n'est pas de la paresse : geometrie de carte, sprites, textures, sons et
+ * videos ont des formats connus, faits d'entiers qui se suivent. Les fouiller a
+ * l'aveugle noie le resultat sous des dizaines de milliers de faux — un
+ * balayage complet du client a rendu 6898 "tables" pour un seul fichier de
+ * terrain. --tout les rouvre si on veut en juger soi-meme.
+ */
+const SANS_INTERET = /\.(gnd|gat|rsw|rsm|spr|act|bik|bmp|tga|jpg|jpeg|png|gif|wav|mp3|ogg|avi|ttf|otf|pal|imf)$/i
+
 function fouiller(nom, buf, oracle, args) {
   const resultats = []
 
@@ -157,7 +170,7 @@ function fouiller(nom, buf, oracle, args) {
 
   // Binaire : exactement la meme recherche que dans une capture reseau, avec
   // le meme seuil calcule. Ce qui vaut pour un flux vaut pour un fichier.
-  for (const table of findDropTables(buf, oracle)) {
+  for (const table of findDropTables(buf, oracle, { minRun: args.seuil })) {
     if (table.count < args.min) continue
     resultats.push({
       genre: 'binaire',
@@ -185,9 +198,25 @@ function main() {
   const clientDir = resolveClientDir(args.client)
   const vfs = openClient(clientDir, { verbose: args.verbose })
 
-  const fichiers = vfs.list((key) => !args.filtre || key.includes(args.filtre))
+  const tous = vfs.list((key) => !args.filtre || key.includes(args.filtre))
+  const fichiers = args.tout ? tous : tous.filter((f) => !SANS_INTERET.test(f.name))
   fichiers.sort((a, b) => b.size - a.size)
-  console.log(`Fichiers : ${fichiers.length}${args.filtre ? ` (filtre « ${args.filtre} »)` : ''}`)
+  console.log(`Fichiers : ${fichiers.length}${args.filtre ? ` (filtre « ${args.filtre} »)` : ''}` +
+    (tous.length !== fichiers.length
+      ? `, ${tous.length - fichiers.length} ecarte(s) : geometrie, sprites, sons, videos`
+      : ''))
+
+  // Le seuil se calcule sur tout le corpus, pas fichier par fichier. Juger
+  // chaque fichier avec le meme budget de hasard, c'est accepter une fausse
+  // table tous les cent fichiers — donc mille sur un client entier.
+  const octets = fichiers.reduce((n, f) => n + Math.min(f.size, args.maxTaille), 0)
+  const seuil = Math.max(
+    minimumRun(octets, oracleDensity(oracle.items, 2)),
+    minimumRun(octets, oracleDensity(oracle.items, 4)),
+  )
+  console.log(`Corpus : ${(octets / 1024 / 1024 / 1024).toFixed(1)} Go — il faut ${seuil} ` +
+    `entrees consecutives pour que le hasard n'en produise pas une seule.`)
+  args.seuil = Number.isFinite(seuil) ? seuil : null
 
   const cibles = fichiers.map((f) => ({ nom: f.name, lire: () => vfs.read(f.name) }))
 

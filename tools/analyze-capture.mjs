@@ -206,6 +206,30 @@ function findMobId(data, runStart, mobs) {
  * @param {{items: Set<number>, mobs: Set<number>}} oracle
  * @returns {Array<object>} tables candidates, la plus credible en tete
  */
+/** Ecart moyen en deca duquel une suite croissante compte les objets au lieu de les citer. */
+const PAS_MOYEN_MINIMUM = 32
+
+/**
+ * Une suite croissante a petits pas n'est pas une table de drop.
+ *
+ * C'est la lecon d'un balayage de tout le client : les fichiers de geometrie
+ * et de sprites contiennent de longues suites d'entiers qui montent un par un.
+ * Comme les identifiants d'objets sont denses par tranches, ces compteurs
+ * ressortaient tous comme des tables — 4001, 4002, 4003, 4004... sur des
+ * dizaines d'entrees.
+ *
+ * Une vraie table de drop ne ressemble pas a ca : ses objets sont pris un peu
+ * partout dans la numerotation, donc leurs ecarts sont grands et irreguliers.
+ */
+export function looksLikeCounter(values) {
+  if (values.length < 3) return false
+  let croissant = true
+  for (let i = 1; i < values.length; i++) if (values[i] <= values[i - 1]) { croissant = false; break }
+  if (!croissant) return false
+  const pas = (values[values.length - 1] - values[0]) / (values.length - 1)
+  return pas < PAS_MOYEN_MINIMUM
+}
+
 export function findDropTables(data, oracle, { minRun = null } = {}) {
   const found = []
 
@@ -224,6 +248,7 @@ export function findDropTables(data, oracle, { minRun = null } = {}) {
       // un identifiant se repete est un alignement fortuit, pas une structure.
       const values = run.positions.map((at) => read(data, at))
       if (new Set(values).size !== values.length) continue
+      if (looksLikeCounter(values)) continue
 
       const rate = inferRateField(data, run, itemWidth)
       const mob = findMobId(data, run.start, oracle.mobs)

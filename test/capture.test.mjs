@@ -202,3 +202,17 @@ test('une ligne sans monstre connu n est pas retenue', async () => {
   const oracle = { mobs: new Set([1002]), items: new Set([909, 501, 4001]) }
   assert.deepEqual(huntTextLines('9999,X,Y,1,50,0,909,7000,501,800,4001,20\n', oracle), [])
 })
+
+test('une suite croissante a petits pas n est pas une table de drop', async () => {
+  const { looksLikeCounter } = await import('../tools/analyze-capture.mjs')
+  // Ce que les fichiers de geometrie contiennent a foison : des compteurs.
+  assert.equal(looksLikeCounter([4001, 4002, 4003, 4004, 4005, 4007, 4008, 4010]), true)
+  assert.equal(looksLikeCounter([7001, 7002, 7003, 7005, 7007, 7009, 7011, 7013]), true)
+})
+
+test('des objets pris un peu partout restent une table possible', async () => {
+  const { looksLikeCounter } = await import('../tools/analyze-capture.mjs')
+  assert.equal(looksLikeCounter([909, 501, 4001, 1202]), false)
+  // Meme triee, une vraie table garde de grands ecarts.
+  assert.equal(looksLikeCounter([501, 909, 1202, 4001, 7563]), false)
+})
