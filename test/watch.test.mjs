@@ -171,3 +171,63 @@ test('le nom du serveur passe devant celui du client', () => {
   assert.equal(vu.nom, 'Gobelin a vapeur')
   assert.equal(vu.nomClient, 'Steam Goblin')
 })
+
+/** Coup porte : source, puis cible. */
+const OPCODE_COUP = 0x08c8
+const coup = (source, cible) => fixe(OPCODE_COUP, LONGUEURS.get(OPCODE_COUP), (b) => {
+  b.writeUInt32LE(source, 0)
+  b.writeUInt32LE(cible, 4)
+})
+/** Gain d'experience : n'arrive qu'a moi, et porte toujours mon identifiant. */
+const MOI = 1844957
+const experience = () => fixe(0x0acc, LONGUEURS.get(0x0acc), (b) => b.writeUInt32LE(MOI, 0))
+
+test('seules les morts dont le dernier coup vient de moi me sont comptees', () => {
+  const flux = Buffer.concat([
+    entree({ aid: 5001, classe: 1280 }),
+    entree({ aid: 5002, classe: 1280 }),
+    entree({ aid: 7001, classe: 4, type: 0 }),
+    experience(), experience(),
+    coup(MOI, 5001), coup(MOI, 5001), coup(7001, 5002), coup(7001, 5002),
+    disparition(5001),
+    disparition(5002),
+  ])
+  const obs = observeStream(flux, ORACLE)
+  assert.equal(obs.moi, MOI)
+  assert.equal(obs.morts.get(1280), 2, 'les deux morts sont vues')
+  assert.equal(obs.mesMorts.get(1280), 1, 'une seule est la mienne')
+})
+
+test('les objets tombes du kill d un autre ne comptent pas pour moi', () => {
+  const flux = Buffer.concat([
+    entree({ aid: 5001, classe: 1280 }),
+    entree({ aid: 7001, classe: 4, type: 0 }),
+    experience(), experience(),
+    coup(7001, 5001), coup(7001, 5001), coup(MOI, 7001),
+    disparition(5001),
+    chute(9001, 909), chute(9002, 501), chute(9003, 4001),
+    ramasse(9001), ramasse(9002), ramasse(9003),
+  ])
+  const obs = observeStream(flux, ORACLE)
+  assert.equal(obs.drops.get(1280).size, 3, 'les objets sont vus tomber')
+  assert.equal(obs.mesDrops.size, 0, 'mais ils ne viennent pas de mon kill')
+})
+
+test('les deux comptes se cumulent sans se melanger', () => {
+  const morceau = Buffer.concat([
+    entree({ aid: 5001, classe: 1280 }),
+    experience(), experience(),
+    coup(MOI, 5001), coup(MOI, 5001),
+    disparition(5001),
+    chute(9001, 909), chute(9002, 501), chute(9003, 4001),
+    ramasse(9001), ramasse(9002), ramasse(9003),
+  ])
+  const state = { version: 1, octets: 0, morceaux: 0, cartes: {}, mobs: {}, pistes: {}, objets: {} }
+  mergeObservation(state, observeStream(morceau, ORACLE), ORACLE)
+  mergeObservation(state, observeStream(morceau, ORACLE), ORACLE)
+
+  const gobelin = summarize(state).mobs.find((m) => m.id === 1280)
+  assert.equal(gobelin.mesMorts, 2)
+  assert.equal(gobelin.mesDrops.find((d) => d.objet === 909).fois, 2)
+  assert.equal(gobelin.mesDrops.find((d) => d.objet === 909).taux, 1)
+})

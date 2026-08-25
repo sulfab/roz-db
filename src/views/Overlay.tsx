@@ -31,8 +31,12 @@ interface MobObserve {
   nomClient: string | null
   nomServeur: string | null
   vues: number
+  /** Morts vues, tous joueurs confondus : ce qui s'est passe autour. */
   morts: number
+  /** Morts dont le dernier coup vient de moi : le seul denominateur qui me concerne. */
+  mesMorts: number
   drops: DropObserve[]
+  mesDrops: DropObserve[]
 }
 
 interface Etat {
@@ -196,8 +200,10 @@ export function Overlay({ db }: { db: Db }) {
               >
                 <span className="nom">{mob.nom}</span>
                 <span className="chiffres">
-                  {mob.vues} vu{mob.vues > 1 ? 's' : ''}
-                  {mob.morts > 0 && ` · ${mob.morts} tué${mob.morts > 1 ? 's' : ''}`}
+                  {mob.mesMorts > 0
+                    ? `${mob.mesMorts} tué${mob.mesMorts > 1 ? 's' : ''} par moi`
+                    : `${mob.vues} vu${mob.vues > 1 ? 's' : ''}`}
+                  {mob.morts > mob.mesMorts && ` · ${mob.morts} au total`}
                 </span>
               </button>
               {choisi === mob.id && <Butin mob={mob} db={db} />}
@@ -232,27 +238,23 @@ function Butin({ mob, db }: { mob: MobObserve; db: Db }) {
           ? ` · ${mob.nomClient} dans le client`
           : ''}
       </p>
-      {mob.drops.length > 0 && (
+      {mob.mesDrops.length > 0 && (
         <>
-          <h3>Observé cette session</h3>
-          <ul>
-            {mob.drops.map((d) => (
-              <li key={d.objet}>
-                <span>{nomObjet(d.objet)}</span>
-                <span className="taux">
-                  {d.taux === null
-                    ? `${d.fois}×, aucune mort comptée`
-                    : `${(d.taux * 100).toFixed(1)} % (${d.fois}/${mob.morts})`}
-                </span>
-              </li>
-            ))}
-          </ul>
-          {mob.morts < 30 && (
+          <h3>Mes kills</h3>
+          <Lignes drops={mob.mesDrops} morts={mob.mesMorts} nomObjet={nomObjet} />
+          {mob.mesMorts < 30 && (
             <p className="avertissement">
-              {mob.morts} mort{mob.morts > 1 ? 's' : ''} observée{mob.morts > 1 ? 's' : ''} : bien
-              trop peu pour un taux fiable.
+              {mob.mesMorts} mort{mob.mesMorts > 1 ? 's' : ''} de mon fait : bien trop peu pour
+              un taux fiable.
             </p>
           )}
+        </>
+      )}
+
+      {mob.drops.length > 0 && (
+        <>
+          <h3>Vu tomber autour {mob.mesDrops.length > 0 && '(tous joueurs)'}</h3>
+          <Lignes drops={mob.drops} morts={mob.morts} nomObjet={nomObjet} />
         </>
       )}
 
@@ -270,7 +272,7 @@ function Butin({ mob, db }: { mob: MobObserve; db: Db }) {
         </>
       )}
 
-      {!mob.drops.length && !table.length && (
+      {!mob.drops.length && !mob.mesDrops.length && !table.length && (
         <p className="avertissement">
           Rien vu tomber pour l'instant, et aucune table importée. Les objets au sol
           n'apparaissent dans la base qu'après avoir été observés en train de tomber : tue-en
@@ -278,5 +280,32 @@ function Butin({ mob, db }: { mob: MobObserve; db: Db }) {
         </p>
       )}
     </div>
+  )
+}
+
+/**
+ * Une table de butin observe.
+ *
+ * Le nombre de morts reste affiche a cote du taux : un pourcentage tire de
+ * trois kills n'est pas un taux, et le cacher reviendrait a le faire croire.
+ */
+function Lignes({ drops, morts, nomObjet }: {
+  drops: DropObserve[]
+  morts: number
+  nomObjet: (id: number) => string
+}) {
+  return (
+    <ul>
+      {drops.map((d) => (
+        <li key={d.objet}>
+          <span>{nomObjet(d.objet)}</span>
+          <span className="taux">
+            {d.taux === null
+              ? `${d.fois}×, aucune mort comptée`
+              : `${(d.taux * 100).toFixed(1)} % (${d.fois}/${morts})`}
+          </span>
+        </li>
+      ))}
+    </ul>
   )
 }

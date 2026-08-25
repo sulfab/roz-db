@@ -9,7 +9,7 @@ import { findCaptureTool, findGameConnection, capturePktmon, captureWireshark } 
 import { loadFlows, looksTls } from './pcap.mjs'
 import {
   frameStream, readEntries, inferClassOffset, inferGroundItems, readGroundItem,
-  readNameReplies, readMapChanges, readVanishings,
+  readNameReplies, readMapChanges, readVanishings, readAttacks, lastAttacker, inferSelf,
 } from './packets.mjs'
 
 /**
@@ -140,8 +140,10 @@ export function observeStream(data, oracle) {
     carte: null,
     especes: new Map(),   // classe -> nombre d'apparitions
     noms: new Map(),      // classe -> nom localise
-    morts: new Map(),     // classe -> nombre de disparitions
-    drops: new Map(),     // classe -> Map(objet -> nombre)
+    morts: new Map(),     // classe -> morts, tous joueurs confondus
+    mesMorts: new Map(),  // classe -> morts dont le dernier coup vient de moi
+    drops: new Map(),     // classe -> Map(objet -> nombre), tous joueurs
+    mesDrops: new Map(),  // classe -> Map(objet -> nombre), de mes kills
     pistes: [],           // paquets a objets, a confirmer sur plusieurs morceaux
   }
 
@@ -194,10 +196,25 @@ export function observeStream(data, oracle) {
   // d'un objet au sol, puisqu'un objet ne tombe que d'un monstre mort.
   const raison = inferRaisonMort(morts, tombes, framed.packets)
   out.raisonMort = raison
+
+  // Qui a tue quoi. Sur une carte frequentee, compter les morts de tout le
+  // monde donne un denominateur qui n'est pas le mien, et le taux ne veut plus
+  // rien dire. On separe donc les deux comptes au lieu d'en melanger un seul.
+  const entites = new Set(entries.flatMap((e) => [e.aid, e.gid]).filter(Boolean))
+  const coups = readAttacks(framed.packets, entites)
+  const moi = inferSelf(framed.packets, entries, { sources: new Set(coups.map((c) => c.source)) })
+  out.moi = moi?.id ?? null
+
+  const miennes = new Set()
   for (const m of morts) {
     if (raison !== null && m.reason !== raison) continue
     const cls = classeDe.get(m.id)
-    if (cls) out.morts.set(cls, (out.morts.get(cls) || 0) + 1)
+    if (!cls) continue
+    out.morts.set(cls, (out.morts.get(cls) || 0) + 1)
+    if (moi && lastAttacker(coups, m.id, m.offset) === moi.id) {
+      miennes.add(m.offset)
+      out.mesMorts.set(cls, (out.mesMorts.get(cls) || 0) + 1)
+    }
   }
 
   // Rattachement d'un objet a l'espece morte juste avant : c'est la seule facon
@@ -209,9 +226,12 @@ export function observeStream(data, oracle) {
     const mort = derniereMortAvant(parOffset, objet.offset, framed.packets)
     const cls = mort && classeDe.get(mort.id)
     if (!cls) continue
-    if (!out.drops.has(cls)) out.drops.set(cls, new Map())
-    const table = out.drops.get(cls)
-    table.set(objet.item, (table.get(objet.item) || 0) + 1)
+    for (const cible of [out.drops, miennes.has(mort.offset) ? out.mesDrops : null]) {
+      if (!cible) continue
+      if (!cible.has(cls)) cible.set(cls, new Map())
+      const table = cible.get(cls)
+      table.set(objet.item, (table.get(objet.item) || 0) + 1)
+    }
   }
 
   return out
@@ -258,7 +278,10 @@ export function mergeObservation(state, obs, oracle) {
   for (const [cls, n] of obs.especes) {
     const key = String(cls)
     if (!state.mobs[key]) {
-      state.mobs[key] = { nom: oracle.mobNames?.get(cls) || null, nomServeur: null, vues: 0, morts: 0, drops: {} }
+      state.mobs[key] = {
+        nom: oracle.mobNames?.get(cls) || null, nomServeur: null,
+        vues: 0, morts: 0, mesMorts: 0, drops: {}, mesDrops: {},
+      }
     }
     state.mobs[key].vues += n
     state.cartes[carte].especes[key] = (state.cartes[carte].especes[key] || 0) + n
@@ -267,15 +290,20 @@ export function mergeObservation(state, obs, oracle) {
     const key = String(cls)
     if (state.mobs[key]) state.mobs[key].nomServeur = nom
   }
-  for (const [cls, n] of obs.morts) {
-    const key = String(cls)
-    if (state.mobs[key]) state.mobs[key].morts += n
+  for (const [champ, source] of [['morts', obs.morts], ['mesMorts', obs.mesMorts]]) {
+    for (const [cls, n] of source) {
+      const key = String(cls)
+      if (state.mobs[key]) state.mobs[key][champ] = (state.mobs[key][champ] || 0) + n
+    }
   }
-  for (const [cls, table] of obs.drops) {
-    const key = String(cls)
-    if (!state.mobs[key]) continue
-    for (const [objet, n] of table) {
-      state.mobs[key].drops[objet] = (state.mobs[key].drops[objet] || 0) + n
+  for (const [champ, source] of [['drops', obs.drops], ['mesDrops', obs.mesDrops]]) {
+    for (const [cls, table] of source) {
+      const key = String(cls)
+      if (!state.mobs[key]) continue
+      state.mobs[key][champ] = state.mobs[key][champ] || {}
+      for (const [objet, n] of table) {
+        state.mobs[key][champ][objet] = (state.mobs[key][champ][objet] || 0) + n
+      }
     }
   }
   for (const piste of obs.pistes) {
@@ -283,6 +311,15 @@ export function mergeObservation(state, obs, oracle) {
     state.pistes[key] = (state.pistes[key] || 0) + 1
   }
   return state
+}
+
+/** Un comptage devient un taux quand il a un denominateur, et pas avant. */
+function tableauDrops(drops, morts) {
+  return Object.entries(drops || {}).map(([objet, n]) => ({
+    objet: Number(objet),
+    fois: n,
+    taux: morts >= 1 ? n / morts : null,
+  })).sort((a, b) => b.fois - a.fois)
 }
 
 /** Ce qu'on affiche : uniquement ce qui repose sur assez d'observations. */
@@ -294,13 +331,12 @@ export function summarize(state) {
     nomServeur: m.nomServeur,
     vues: m.vues,
     morts: m.morts,
-    drops: Object.entries(m.drops).map(([objet, n]) => ({
-      objet: Number(objet),
-      fois: n,
-      // Un taux observe sans morts derriere lui n'est pas un taux.
-      taux: m.morts >= 1 ? n / m.morts : null,
-    })).sort((a, b) => b.fois - a.fois),
-  })).sort((a, b) => b.vues - a.vues)
+    mesMorts: m.mesMorts || 0,
+    // Deux tables, jamais fondues : ce que j'ai tue moi-meme donne un taux qui
+    // me concerne ; le total dit seulement ce qui s'est passe autour.
+    drops: tableauDrops(m.drops, m.morts),
+    mesDrops: tableauDrops(m.mesDrops, m.mesMorts || 0),
+  })).sort((a, b) => (b.mesMorts || 0) - (a.mesMorts || 0) || b.vues - a.vues)
 
   return {
     carte: state.derniereCarte || null,

@@ -641,3 +641,108 @@ export function readGroundItem(packet, forme) {
     offset: packet.offset,
   }
 }
+
+/**
+ * Retrouve qui est "moi" dans le flux.
+ *
+ * Sans ca, tout compte : les monstres tues par les autres joueurs autour, et
+ * les objets tombes de leurs kills. Sur une carte frequentee, le denominateur
+ * d'un taux devient celui de tout le monde, et le chiffre ne veut plus rien
+ * dire.
+ *
+ * Deux marques concordantes, aucune supposee :
+ *  - mon personnage n'a pas de paquet d'apparition. Le serveur en envoie un
+ *    pour tout ce qui entre dans mon champ de vision, mais pas pour moi : le
+ *    client sait deja qui il joue ;
+ *  - certains paquets ne sont adresses qu'a moi — le gain d'experience, par
+ *    exemple — et portent toujours le meme identifiant, le mien.
+ *
+ * L'intersection des deux ne laisse qu'un candidat.
+ */
+export function inferSelf(packets, entries, { sources = null } = {}) {
+  const connus = new Set()
+  for (const e of entries) { connus.add(e.aid); connus.add(e.gid) }
+
+  // Identifiants constants d'un bout a l'autre d'un meme type de paquet : ce
+  // sont les paquets qui me sont adresses.
+  const parOpcode = new Map()
+  for (const p of packets) {
+    if (p.payload.length < 4) continue
+    if (!parOpcode.has(p.opcode)) parOpcode.set(p.opcode, [])
+    parOpcode.get(p.opcode).push(p.payload.readUInt32LE(0))
+  }
+
+  const candidats = new Map()
+  for (const [opcode, ids] of parOpcode) {
+    if (ids.length < 2) continue
+    const distincts = new Set(ids)
+    if (distincts.size !== 1) continue
+    const [id] = distincts
+    if (!id || connus.has(id)) continue
+    candidats.set(id, (candidats.get(id) || 0) + ids.length)
+  }
+  if (!candidats.size) return null
+
+  // Deuxieme marque quand on la fournit : mon personnage frappe. Un candidat
+  // qui ne porte jamais un coup n'est pas moi, c'est un compteur quelconque.
+  const confirmes = sources
+    ? [...candidats].filter(([id]) => sources.has(id))
+    : [...candidats]
+  const retenus = confirmes.length ? confirmes : [...candidats]
+
+  const [meilleur] = retenus.sort((a, b) => b[1] - a[1])
+  return { id: meilleur[0], preuves: meilleur[1], ambigu: retenus.length > 1 }
+}
+
+/**
+ * Coups portes : qui frappe qui.
+ *
+ * On reconnait ces paquets a leur forme — deux identifiants en tete, dont le
+ * second designe une entite apparue — et non a leur numero, qui change d'une
+ * version de client a l'autre.
+ */
+const PART_CIBLES_CONNUES = 0.6
+
+export function readAttacks(packets, entityIds) {
+  // Zero n'est l'identifiant de personne : les monstres n'ont pas de second
+  // identifiant, et le champ reste vide. Le garder ferait passer pour un coup
+  // n'importe quel paquet dont les octets +4 a +7 sont nuls.
+  const cibles = new Set([...(entityIds || [])].filter(Boolean))
+  if (!cibles.size) return []
+  const parOpcode = new Map()
+  for (const p of packets) {
+    if (p.payload.length < 8) continue
+    if (!parOpcode.has(p.opcode)) parOpcode.set(p.opcode, [])
+    parOpcode.get(p.opcode).push(p)
+  }
+
+  const coups = []
+  for (const group of parOpcode.values()) {
+    // Deux paquets suffisent : ce qui prouve la forme, c'est que la cible soit
+    // une entite reellement apparue, pas le nombre d'occurrences.
+    if (group.length < 2) continue
+    const vises = group.filter((p) => {
+      const cible = p.payload.readUInt32LE(4)
+      return cibles.has(cible) && cible !== p.payload.readUInt32LE(0)
+    })
+    if (vises.length < group.length * PART_CIBLES_CONNUES) continue
+    for (const p of vises) {
+      coups.push({
+        offset: p.offset,
+        source: p.payload.readUInt32LE(0),
+        cible: p.payload.readUInt32LE(4),
+      })
+    }
+  }
+  return coups.sort((a, b) => a.offset - b.offset)
+}
+
+/** Qui a frappe cette entite en dernier avant cet octet. */
+export function lastAttacker(coups, cible, avant) {
+  let source = null
+  for (const c of coups) {
+    if (c.offset >= avant) break
+    if (c.cible === cible) source = c.source
+  }
+  return source
+}
