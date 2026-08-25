@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import path from 'node:path'
 
 /**
  * Lecture de captures reseau : pcap classique et pcapng (le format par defaut
@@ -239,6 +240,23 @@ export function looksTls(data) {
   return data.length > 5 && data[0] === 0x16 && data[1] === 0x03 && data[2] <= 0x04
 }
 
+/**
+ * Un flux deja extrait, tel que celui ecrit par --raw, n'est pas une capture :
+ * il n'a ni magie ni en-tetes. On le rend tel quel plutot que d'echouer, pour
+ * pouvoir reanalyser un flux qu'on s'est deja envoye.
+ */
+function isCapture(buf) {
+  if (buf.length < 8) return false
+  if (buf.readUInt32BE(0) === PCAPNG_BLOCK_SECTION) return true
+  const magic = buf.readUInt32LE(0)
+  return magic === PCAP_MAGIC || magic === PCAP_MAGIC_NANO ||
+    magic === PCAP_MAGIC_SWAPPED || magic === PCAP_MAGIC_NANO_SWAPPED
+}
+
 export function loadFlows(file) {
+  const buf = fs.readFileSync(file)
+  if (!isCapture(buf)) {
+    return [{ key: path.basename(file), bytes: buf.length, data: buf, isServerToClient: null, gaps: 0 }]
+  }
   return reassemble(readCapture(file))
 }

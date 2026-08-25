@@ -34,9 +34,12 @@ Options
       --list            liste les interfaces puis quitte
 
 Marche a suivre
-  1. Lance le jeu et connecte-toi.
-  2. Ouvre un terminal en administrateur, puis cette commande.
-  3. Dans le jeu, ouvre les fiches des monstres qui t'interessent.
+  1. Ouvre un terminal en administrateur et lance cette commande AVANT le jeu.
+     Une capture demarree apres la connexion rate l'essentiel du trafic.
+  2. Lance le jeu et connecte-toi.
+  3. Traverse la carte : chaque monstre croise donne son espece.
+     Survole ou cible les monstres : c'est a ce moment-la, et pas avant, que le
+     serveur envoie leur nom.
   4. Ctrl+C pour arreter, puis :  npm run analyze -- <fichier>
 `
 
@@ -179,8 +182,8 @@ async function capturePktmon({ port, out, duration }) {
   }
 
   console.log(`Sortie  : ${out}`)
-  console.log('\nCapture en cours. Dans le jeu, ouvre les fiches des monstres qui t\'interessent,')
-  console.log('puis Ctrl+C pour arreter.\n')
+  console.log('\nCapture en cours. Lance le jeu, traverse la carte et survole les monstres')
+  console.log('(le serveur n\'envoie leur nom que quand le client le demande), puis Ctrl+C.\n')
 
   await waitForStop(duration, progressReporter(etl))
 

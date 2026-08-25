@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'
 import { loadFlows, looksTls } from './pcap.mjs'
+import { frameStream, readEntries, inferClassOffset, inferItemPackets, trailingName } from './packets.mjs'
 import { ROOT } from './client-path.mjs'
 
 /**
@@ -20,6 +21,7 @@ import { ROOT } from './client-path.mjs'
  */
 
 const MIN_RUN = 3          // plancher absolu ; le vrai seuil est calcule
+const MIN_STRIDE = 4       // taille minimale d'un enregistrement
 const MAX_STRIDE = 32      // taille maximale d'un enregistrement
 const MOB_LOOKBACK = 96    // ou chercher l'identifiant du mob avant la liste
 /** Nombre de fausses tables qu'on accepte de voir apparaitre par hasard. */
@@ -32,19 +34,24 @@ Cherche des tables de drop dans une capture reseau du jeu.
 
 Options
   -o, --out <fichier>   CSV des drops trouves   (defaut : captures/drops.csv)
-      --min-run <n>     nombre minimal d'items consecutifs (defaut : ${MIN_RUN})
+      --min-run <n>     force le nombre minimal d'items consecutifs
+                        (par defaut, calcule d'apres la densite de l'oracle)
       --raw <fichier>   ecrit aussi le flux serveur brut, pour inspection
       --json            sortie detaillee en JSON sur la sortie standard
+      --data <dossier>  ou lire l'oracle          (defaut : public/data)
 `
 
 function parseArgs(argv) {
-  const args = { minRun: MIN_RUN }
+  // null, et non MIN_RUN : sans cela l'option ecrasait le seuil calcule, qui
+  // n'etait alors jamais utilise.
+  const args = { minRun: null }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--out' || a === '-o') args.out = path.resolve(argv[++i])
     else if (a === '--min-run') args.minRun = Number(argv[++i])
     else if (a === '--raw') args.raw = path.resolve(argv[++i])
     else if (a === '--json') args.json = true
+    else if (a === '--data') args.data = path.resolve(argv[++i])
     else if (a === '--help' || a === '-h') args.help = true
     else if (!args.file) args.file = a
   }
@@ -57,9 +64,14 @@ export function loadOracle(dataDir = path.join(ROOT, 'public', 'data')) {
     const file = path.join(dataDir, name)
     return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {}
   }
-  const items = new Set(Object.keys(read('items.json')).map(Number))
-  const mobs = new Set(Object.keys(read('mobs.json')).map(Number))
-  return { items, mobs }
+  const itemTable = read('items.json')
+  const mobTable = read('mobs.json')
+  const items = new Set(Object.keys(itemTable).map(Number))
+  const mobs = new Set(Object.keys(mobTable).map(Number))
+  // Les noms ne servent pas a reconnaitre : ils rendent lisible ce qu'on a
+  // reconnu, quand on affiche les monstres croises dans la capture.
+  const mobNames = new Map(Object.entries(mobTable).map(([id, m]) => [Number(id), m?.nom || m?.name]))
+  return { items, mobs, mobNames }
 }
 
 const readers = [
@@ -93,7 +105,7 @@ function findItemHits(data, items, width, read) {
  * On calcule donc le seuil : le plus petit k tel que le nombre de suites
  * attendues par hasard reste sous le budget qu'on s'accorde.
  */
-export function minimumRun(dataLength, density, strides = (MAX_STRIDE - 4) / 2 + 1) {
+export function minimumRun(dataLength, density, strides = (MAX_STRIDE - MIN_STRIDE) / 2 + 1) {
   if (density <= 0) return MIN_RUN
   if (density >= 1) return Infinity
   const trials = Math.max(1, dataLength * strides)
@@ -122,7 +134,7 @@ function findRuns(hits, minRun) {
 
   for (const start of hits) {
     if (consumed.has(start)) continue
-    for (let stride = 4; stride <= MAX_STRIDE; stride += 2) {
+    for (let stride = MIN_STRIDE; stride <= MAX_STRIDE; stride += 2) {
       const run = [start]
       let next = start + stride
       while (positions.has(next)) { run.push(next); next += stride }
@@ -271,6 +283,72 @@ export function guessScale(entries) {
   return { base: 100_000, note: '1/1000 de pourcent' }
 }
 
+/**
+ * Lit la capture comme ce qu'elle est : une suite de paquets du jeu.
+ *
+ * On a longtemps cherche les tables de drop a l'aveugle, par statistique, faute
+ * de savoir ce qu'il y avait dans le flux. Ce n'est plus necessaire : le trafic
+ * est en clair et il se decoupe, donc on peut nommer ce qu'on lit au lieu de le
+ * deviner. La recherche statistique reste ensuite, comme filet.
+ */
+function reportPackets(flow, oracle) {
+  const framed = frameStream(flow.data)
+  if (!framed.packets.length) {
+    console.log(`\nPaquets de ${flow.key} : ce flux ne se decoupe pas en paquets du jeu.`)
+    return
+  }
+
+  console.log(`\nPaquets de ${flow.key}`)
+  console.log(`  ${framed.packets.length} paquets, ` +
+    `${(framed.coverage * 100).toFixed(0)} % des octets reconnus` +
+    (framed.learned.size ? `, ${framed.learned.size} longueur(s) deduite(s)` : ''))
+
+  const entries = readEntries(framed.packets)
+  const mobs = entries.filter((e) => e.kind === 'monstre')
+
+  const classe = inferClassOffset(entries, oracle.mobs)
+  if (classe) {
+    const vus = new Map()
+    for (const e of mobs) {
+      const id = e.payload.readUInt16LE(classe.offset)
+      vus.set(id, (vus.get(id) || 0) + 1)
+    }
+    console.log(`  ${mobs.length} apparition(s) de monstre, ${vus.size} espece(s) :`)
+    for (const [id, n] of [...vus].sort((a, b) => b[1] - a[1]).slice(0, 12)) {
+      console.log(`      ${String(id).padStart(5)}  ${oracle.mobNames?.get(id) || '?'}  x${n}`)
+    }
+    if (!classe.solid) {
+      console.log('      (a prendre avec des pincettes : avec si peu d\'especes croisees, ' +
+        `le hasard produirait ${classe.expectedByChance.toFixed(2)} position(s) aussi bonne(s))`)
+    }
+  } else if (mobs.length) {
+    console.log(`  ${mobs.length} apparition(s) de monstre, mais aucune position ne donne ` +
+      'un monstre connu du client : la capture est trop courte pour trancher.')
+  }
+
+  const noms = new Map()
+  for (const e of entries) {
+    const nom = trailingName(e.payload)
+    if (nom) noms.set(e.aid, nom)
+  }
+  if (noms.size) {
+    console.log(`  ${noms.size} nom(s) lus en clair : ${[...noms.values()].slice(0, 8).join(', ')}`)
+  }
+
+  const drops = inferItemPackets(framed.packets, oracle.items)
+  if (drops.length) {
+    console.log("  Paquets portant des identifiants d'objets :")
+    for (const d of drops.slice(0, 6)) {
+      console.log(`      paquet 0x${d.opcode.toString(16).padStart(4, '0')} ` +
+        `objet a +${d.offset} sur ${d.size * 8} bits, ${d.count} occurrence(s) : ` +
+        d.items.slice(0, 6).join(', '))
+    }
+  } else {
+    console.log("  Aucun paquet ne porte d'identifiant d'objet : rien n'est tombe au sol " +
+      'pendant la capture, ou elle est trop courte.')
+  }
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2))
   if (args.help || !args.file) {
@@ -282,7 +360,7 @@ function main() {
     process.exit(1)
   }
 
-  const oracle = loadOracle()
+  const oracle = loadOracle(args.data)
   if (!oracle.items.size) {
     console.error('public/data/items.json est vide : lance d\'abord `npm run extract`.')
     console.error('Sans la liste des identifiants du client, il n\'y a rien pour reconnaitre un drop.')
@@ -321,7 +399,11 @@ function main() {
     )
   }
 
-  const candidates = flows.filter((f) => f.isServerToClient !== false && f.bytes > 256)
+  // Le seul flux inexploitable est celui trop court pour contenir la plus
+  // petite table possible : MIN_RUN entrees au pas minimal. Ecarter davantage
+  // reviendrait a jeter des donnees sur un seuil invente.
+  const floor = MIN_RUN * MIN_STRIDE
+  const candidates = flows.filter((f) => f.isServerToClient !== false && f.bytes >= floor)
   if (!candidates.length) {
     console.error('\nAucun flux serveur -> client exploitable.')
     process.exit(1)
@@ -338,6 +420,7 @@ function main() {
   for (const flow of candidates) {
     if (looksTls(flow.data)) continue
     if (args.raw) fs.writeFileSync(args.raw, flow.data)
+    reportPackets(flow, oracle)
     for (const table of findDropTables(flow.data, oracle, { minRun: args.minRun })) {
       results.push({ flow: flow.key, ...table })
     }

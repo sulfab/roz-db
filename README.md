@@ -98,7 +98,35 @@ fausse table sur cent — huit entrées pour un oracle dense en 16 bits, trois s
 32 bits où l'espace est immense. Il rejette aussi les tables où un identifiant se répète :
 une table de drop ne liste pas deux fois le même objet.
 
-**L'analyse ne suppose aucun format de paquet.** Il n'est pas public, et le deviner
+**Le trafic du jeu est en clair.** Ce n'était pas acquis : on a d'abord cherché les tables
+de drop à l'aveugle, en supposant le contenu illisible. Une capture réelle a tranché. Elle se
+découpe en paquets — un numéro sur deux octets, puis un contenu de longueur déterminée par ce
+numéro — et 47 paquets s'y enchaînent sans trou. La preuve n'est pas le découpage lui-même,
+qui pourrait être une coïncidence, mais ce qu'il fait tomber juste : le nom du personnage
+apparaît **entier, exactement en queue** des paquets d'apparition, trois fois de suite, à des
+positions que rien dans l'algorithme ne cherchait.
+
+La difficulté restante est connue : la longueur d'un paquet dépend de son numéro, et la table
+qui les relie n'est pas publique. `tools/packets.mjs` répond en deux temps — les longueurs
+vérifiées sur du trafic réel sont écrites en dur, **et les autres se déduisent de la capture
+elle-même** : une longueur juste fait retomber le flux sur des paquets déjà connus, une
+longueur fausse le désynchronise aussitôt. Quand deux longueurs font aussi bien, l'outil ne
+tranche pas et s'arrête : mieux vaut 86 % du flux lu que 100 % découpé au hasard.
+
+De là, `npm run analyze` nomme ce qu'il lit au lieu de le deviner : espèces de monstres
+croisées, pseudonymes lus en clair, paquets portant des identifiants d'objets. La position de
+la classe du monstre dans le paquet dépend de la version du client : elle est **déduite** en
+cherchant le seul décalage où toutes les apparitions tombent sur un monstre que le client
+connaît — et l'outil dit combien de décalages le hasard produirait, pour qu'on sache quand
+ne pas le croire.
+
+**Un oracle dense ne prouve rien.** Les identifiants d'objets s'étalent de 500 à 20 000 ;
+un champ qui ne contient jamais que de petits nombres tombe dans une zone où l'oracle est
+presque plein, et « c'est un objet connu » n'y apprend plus rien. C'est la densité **locale**,
+sur l'intervalle réellement rencontré, qui décide — sans quoi les paquets de dégâts
+ressortaient comme des tables de drop.
+
+**L'analyse statistique ne suppose aucun format de paquet.** Il n'est pas public, et le deviner
 produirait des chiffres faux sans qu'on s'en aperçoive. Une table de drop, quel que soit son
 enrobage, est une suite d'enregistrements de taille constante contenant chacun un
 identifiant d'item valide — et le client vient de nous donner la liste exacte des items et
@@ -108,7 +136,17 @@ précède, puis propose l'échelle des taux. Il affiche ce qu'il a déduit : **v
 trois lignes en jeu avant d'importer.**
 
 Si rien n'est trouvé, l'analyseur le dit et distingue les cas : trafic TLS (illisible),
-ou contenu compressé par le jeu. `--raw flux.bin` écrit le flux brut pour inspection.
+ou contenu compressé par le jeu. `--raw flux.bin` écrit le flux brut pour inspection, et
+`npm run analyze -- flux.bin` sait relire un flux brut aussi bien qu'une capture.
+
+**Lance la capture avant le jeu.** Une session produit des centaines de kilo-octets ; une
+capture démarrée après la connexion en attrape quelques-uns et ne contient que des
+déplacements. L'analyseur le dit quand c'est le cas, plutôt que de conclure sur trop peu.
+
+**Les noms des monstres ne sont pas dans le paquet d'apparition.** Celui-ci porte la classe
+du monstre, pas son nom : le serveur ne l'envoie que lorsque le client le demande, c'est-à-dire
+quand tu **survoles ou cibles** le monstre. Pour relever les noms d'une carte, il faut donc
+les survoler ; les traverser suffit à relever les espèces présentes.
 
 ## Comment ça marche
 

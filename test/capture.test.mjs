@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import os from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { readCapture, reassemble, loadFlows, looksTls } from '../tools/pcap.mjs'
 import { findDropTables, guessScale, minimumRun, oracleDensity } from '../tools/analyze-capture.mjs'
@@ -139,4 +140,32 @@ test('le seuil suit la densite de l oracle', () => {
   // Sur 32 bits l'espace est si grand que trois entrees suffisent.
   assert.equal(minimumRun(3000, oracleDensity(dense, 4)), 3)
   assert.equal(minimumRun(3000, oracleDensity(sparse, 4)), 3)
+})
+
+test('en ligne de commande, le seuil calcule est bien celui applique', () => {
+  // Le calcul existait, mais la valeur par defaut de --min-run l'ecrasait : la
+  // commande retombait sur trois entrees et annoncait des dizaines de tables
+  // sur du trafic quelconque.
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oracle-'))
+
+  const items = {}
+  for (let i = 0; i < 9646; i++) items[500 + i] = { id: 500 + i, name: `objet ${i}` }
+  const mobs = {}
+  for (let i = 0; i < 585; i++) mobs[1000 + i] = { id: 1000 + i, name: `mob ${i}` }
+  fs.writeFileSync(path.join(dataDir, 'items.json'), JSON.stringify(items))
+  fs.writeFileSync(path.join(dataDir, 'mobs.json'), JSON.stringify(mobs))
+
+  const r = spawnSync(process.execPath, [
+    path.join(root, 'tools', 'analyze-capture.mjs'), CAPTURE,
+    '--data', dataDir, '--out', path.join(dataDir, 'drops.csv'),
+  ], { encoding: 'utf8' })
+
+  // La capture contient deux vraies tables, sur 32 bits : elles doivent
+  // ressortir. Ce qui ne doit plus arriver, c'est la nuee de fausses tables
+  // 16 bits que produisait le seuil fige a trois.
+  const output = (r.stdout || '') + (r.stderr || '')
+  const count = Number(/(\d+) table\(s\) candidate\(s\)/.exec(output)?.[1] ?? -1)
+  assert.equal(count, 2, output)
+  assert.match(output, /Seuil retenu : (?:[3-9]|\d\d)/, output)
 })
