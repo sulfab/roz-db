@@ -79,15 +79,23 @@ Les bases fan-made (RagnarokZero.net, Midgard Hub) annoncent toutes la même ori
 **TW RO Zero**, en excluant explicitement les données kRO / iRO. C'est pourquoi importer un
 `mob_db` de rAthena serait une erreur : mauvaise lignée.
 
-**La source la plus proche de Zero Global est Divine Pride** : c'est une base multiserveur, et
-sa liste de serveurs contient « Global Zero » — celui-ci, pas un voisin. On peut donc y demander
-les taux du serveur qu'on joue plutôt que ceux d'une autre région.
+**Aucune source publique n'est officielle.** Gravity ne publie pas ses taux, et le client ne les
+contient pas — c'est vérifié plus bas. Divine Pride, RagnarokZero.net, Midgard Hub : ce sont
+toutes des bases communautaires, alimentées par du minage de client et de l'observation. La seule
+chose qui les départage est **de quel serveur** elles parlent, et Divine Pride est la seule à
+distinguer « Global Zero » de kRO Zero et twRO Zero — donc la seule où l'on puisse demander la
+bonne région. Ça ne la rend pas officielle, ça la rend pertinente.
 
 ```bash
 npm run fetch-db -- --url "https://.../Monster/{id}?apiKey=XXX" --max 5   # essai
-npm run fetch-db -- --url "..."                                          # tout
+npm run fetch-db -- --url "..."          # les espèces de la carte où tu es
 npm run import-external -- captures/db-distante.json --source "Divine Pride (Global Zero)"
 ```
+
+Par défaut il ne demande **que les espèces de la carte où tu te trouves** — quelques dizaines,
+prises dans `observations.json` que remplit `npm run watch`. C'est ce qui fait tenir la chose
+dans un quota journalier : tu joues, la liste s'étoffe, et chaque carte ne coûte que ce qu'elle
+contient. `--liste vus` élargit à tout ce que tu as croisé, `--liste mobs` aux 585 du client.
 
 `fetch-db` ne sait rien de l'API qu'on lui donne : il reçoit un gabarit d'adresse avec `{id}`,
 appelle une fois par monstre **du client** — donc uniquement ce qui existe dans le jeu qu'on
