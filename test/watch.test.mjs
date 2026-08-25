@@ -231,3 +231,33 @@ test('les deux comptes se cumulent sans se melanger', () => {
   assert.equal(gobelin.mesDrops.find((d) => d.objet === 909).fois, 2)
   assert.equal(gobelin.mesDrops.find((d) => d.objet === 909).taux, 1)
 })
+
+test('une table de reference conforme aux kills est declaree conforme', async () => {
+  const { compareToReference } = await import('../tools/watch.mjs')
+  // 200 kills, un objet annonce a 10 % : voir 21 fois est parfaitement normal.
+  const mob = { mesMorts: 200, mesDrops: [{ objet: 909, fois: 21 }] }
+  const [ligne] = compareToReference(mob, [{ item: 909, chance: 10 }])
+  assert.equal(ligne.verdict, 'conforme')
+  assert.equal(ligne.attendu, 20)
+})
+
+test('un ecart que le hasard n explique pas est signale', async () => {
+  const { compareToReference } = await import('../tools/watch.mjs')
+  // Annonce a 10 %, jamais vu en 200 morts : la table ne vaut pas ici.
+  const mob = { mesMorts: 200, mesDrops: [] }
+  const [ligne] = compareToReference(mob, [{ item: 909, chance: 10 }])
+  assert.equal(ligne.verdict, 's ecarte')
+})
+
+test('sur trop peu de morts, aucun verdict n est rendu', async () => {
+  const { compareToReference } = await import('../tools/watch.mjs')
+  // Trois morts : tout est compatible avec tout, annoncer un ecart serait faux.
+  const mob = { mesMorts: 3, mesDrops: [] }
+  const [ligne] = compareToReference(mob, [{ item: 909, chance: 10 }])
+  assert.equal(ligne.verdict, 'trop peu')
+})
+
+test('sans kill a moi, la comparaison ne dit rien', async () => {
+  const { compareToReference } = await import('../tools/watch.mjs')
+  assert.deepEqual(compareToReference({ mesMorts: 0, mesDrops: [] }, [{ item: 909, chance: 10 }]), [])
+})

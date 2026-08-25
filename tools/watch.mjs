@@ -313,6 +313,49 @@ export function mergeObservation(state, obs, oracle) {
   return state
 }
 
+/** En deca de tant de drops attendus, aucun ecart n'est concluant. */
+const ATTENDU_MINIMUM = 5
+/** Largeur de l'intervalle juge normal, en ecarts-types. */
+const ECARTS_TYPES = 2.58   // environ 99 %
+
+/**
+ * Confronte une table de reference a ce qu'on a reellement vu tomber.
+ *
+ * C'est le seul usage vraiment solide de l'observation. Elle ne remplacera
+ * jamais une table — un objet a 0,01 % demande des centaines de milliers de
+ * morts — mais elle sait dire si une table importee vaut pour ce serveur-ci.
+ * Une table venue d'une autre region s'en ecarte, et ca se voit vite.
+ *
+ * Le jugement est retenu tant que trop peu de drops sont attendus : sur trois
+ * morts, tout est compatible avec tout, et annoncer un ecart serait faux.
+ */
+export function compareToReference(mob, reference) {
+  const morts = mob.mesMorts || 0
+  if (!morts || !reference?.length) return []
+
+  const vus = new Map(mob.mesDrops.map((d) => [d.objet, d.fois]))
+  return reference.map((ref) => {
+    const p = (ref.chance ?? 0) / 100
+    const attendu = p * morts
+    const observe = vus.get(ref.item) || 0
+    if (attendu < ATTENDU_MINIMUM) {
+      return { objet: ref.item, attendu, observe, verdict: 'trop peu', morts }
+    }
+    // Ecart-type d'un tirage binomial : c'est ce qui dit si la difference
+    // s'explique par le hasard ou par une table qui ne correspond pas.
+    const sigma = Math.sqrt(morts * p * (1 - p))
+    const ecart = Math.abs(observe - attendu) / (sigma || 1)
+    return {
+      objet: ref.item,
+      attendu,
+      observe,
+      ecart,
+      verdict: ecart <= ECARTS_TYPES ? 'conforme' : 's ecarte',
+      morts,
+    }
+  })
+}
+
 /** Un comptage devient un taux quand il a un denominateur, et pas avant. */
 function tableauDrops(drops, morts) {
   return Object.entries(drops || {}).map(([objet, n]) => ({
@@ -323,7 +366,7 @@ function tableauDrops(drops, morts) {
 }
 
 /** Ce qu'on affiche : uniquement ce qui repose sur assez d'observations. */
-export function summarize(state) {
+export function summarize(state, reference = null) {
   const mobs = Object.entries(state.mobs).map(([id, m]) => ({
     id: Number(id),
     nom: m.nomServeur || m.nom || `monstre ${id}`,
@@ -337,6 +380,14 @@ export function summarize(state) {
     drops: tableauDrops(m.drops, m.morts),
     mesDrops: tableauDrops(m.mesDrops, m.mesMorts || 0),
   })).sort((a, b) => (b.mesMorts || 0) - (a.mesMorts || 0) || b.vues - a.vues)
+
+  // La table importee ne sert pas qu'a remplir un affichage : confrontee aux
+  // kills, elle dit si elle vaut pour ce serveur.
+  if (reference) {
+    for (const mob of mobs) {
+      mob.reference = compareToReference(mob, reference[String(mob.id)] || [])
+    }
+  }
 
   return {
     carte: state.derniereCarte || null,
@@ -430,6 +481,12 @@ async function main() {
     if (found) { host = found.host; port = found.port }
   }
 
+  const dropsFile = path.join(dataDir, 'drops.json')
+  let reference = null
+  if (fs.existsSync(dropsFile)) {
+    try { reference = JSON.parse(fs.readFileSync(dropsFile, 'utf8')).mobs || null } catch { /* pas de table */ }
+  }
+
   const stateFile = path.join(dataDir, 'observations.json')
   const state = loadState(stateFile)
   state.octets = state.octets || 0
@@ -437,7 +494,7 @@ async function main() {
   console.log(`Outil   : ${tool.cmd}`)
   console.log(`Base    : ${stateFile}`)
   console.log(host ? `Jeu     : ${host}:${port}` : 'Jeu     : non detecte, tout le TCP sera lu')
-  const site = args.serve ? serve(args.port, () => summarize(state), dataDir) : null
+  const site = args.serve ? serve(args.port, () => summarize(state, reference), dataDir) : null
   if (site) console.log(`Overlay : http://localhost:${args.port}/#/overlay`)
   console.log(`\nMorceaux de ${args.chunk} s. Ctrl+C pour arreter.\n`)
 
@@ -485,7 +542,7 @@ async function main() {
     }
     saveState(stateFile, state)
 
-    const vue = summarize(state)
+    const vue = summarize(state, reference)
     const nommes = vue.mobs.filter((m) => m.nomServeur).length
     console.log(`  ${vue.carte || 'carte inconnue'} — ${vue.mobs.length} espece(s), ` +
       `${nommes} nommee(s), ${vue.mobs.reduce((s, m) => s + m.morts, 0)} mort(s), ` +

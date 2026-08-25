@@ -235,3 +235,5 @@ table.grid tr:hover td { background: var(--panel-2); }
 body.overlay-detache { padding: 10px; background: var(--bg); color: var(--text); }
 body.overlay-detache .overlay-mobs { margin-top: 0; }
 .overlay-butin .fiche { margin: 0 0 4px; color: var(--muted); font-size: .9em; }
+.overlay-butin .conforme { color: var(--good); }
+.overlay-butin .diverge { color: var(--warn); }

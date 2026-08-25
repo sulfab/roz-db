@@ -37,6 +37,17 @@ interface MobObserve {
   mesMorts: number
   drops: DropObserve[]
   mesDrops: DropObserve[]
+  /** Confrontation de la table importee a mes kills, quand il y en a assez. */
+  reference?: Comparaison[]
+}
+
+interface Comparaison {
+  objet: number
+  attendu: number
+  observe: number
+  ecart?: number
+  verdict: 'conforme' | 's ecarte' | 'trop peu'
+  morts: number
 }
 
 interface Etat {
@@ -262,13 +273,31 @@ function Butin({ mob, db }: { mob: MobObserve; db: Db }) {
         <>
           <h3>Table importée</h3>
           <ul>
-            {table.map((d) => (
-              <li key={d.item}>
-                <span>{nomObjet(d.item)}</span>
-                <span className="taux">{d.chance} %</span>
-              </li>
-            ))}
+            {table.map((d) => {
+              const verdict = mob.reference?.find((r) => r.objet === d.item)
+              return (
+                <li key={d.item}>
+                  <span>{nomObjet(d.item)}</span>
+                  <span className="taux">
+                    {d.chance} %{verdict && verdict.verdict !== 'trop peu' && (
+                      <span className={verdict.verdict === 'conforme' ? 'conforme' : 'diverge'}>
+                        {' '}
+                        {verdict.verdict === 'conforme' ? '✓' : '≠'} {verdict.observe} vu
+                        {verdict.observe > 1 ? 's' : ''} sur {verdict.attendu.toFixed(1)} attendu
+                        {verdict.attendu > 1 ? 's' : ''}
+                      </span>
+                    )}
+                  </span>
+                </li>
+              )
+            })}
           </ul>
+          {mob.reference?.some((r) => r.verdict === 's ecarte') && (
+            <p className="avertissement">
+              Cette table s'écarte de ce que tu vois tomber. Elle vient probablement d'un autre
+              serveur : tes comptages font foi ici.
+            </p>
+          )}
         </>
       )}
 

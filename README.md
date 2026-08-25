@@ -154,6 +154,16 @@ npm run watch -- --brut captures/flux.bin    # le flux du serveur, bout à bout
 npm run analyze -- captures/flux.bin         # relecture hors ligne
 ```
 
+**Zero Global n'a pas d'encyclopédie en jeu**, donc le serveur n'envoie jamais de table de
+taux : il n'existe aucune source de première main sur ce serveur. Toute table affichée ici vient
+d'ailleurs, et c'est précisément pourquoi l'observation garde un rôle — pas comme source, comme
+**contrôle**.
+
+Une table importée est confrontée à ce que tu vois tomber : sur *n* de tes kills, un objet
+annoncé à *p* devrait apparaître environ *np* fois, à quelques écarts-types près. Au-delà,
+l'écart ne s'explique plus par le hasard et la table ne vaut pas pour ce serveur. Le jugement est
+retenu tant que trop peu de drops sont attendus — sur trois morts, tout est compatible avec tout.
+
 **Un taux observé n'est pas le taux officiel.** C'est un comptage : tant de fois l'objet, sur
 tant de morts. Le fichier garde toujours les deux nombres, jamais le seul pourcentage, et
 l'affichage prévient tant que les morts observées se comptent sur les doigts.
