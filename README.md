@@ -63,6 +63,18 @@ ce qui tombe. Trois sources, donc, et l'app les garde **séparées** plutôt que
 | client TW RO Zero | ses `.lub` contiennent les tables, contrairement au Global | complet, mais TW ≠ Global |
 | base publique en JSON | `npm run import-external` | dépend de qui l'a compilée |
 
+**Le client Global n'a pas de table de drop — vérifié, plus supposé.** `npm run hunt` a lu ses
+171 756 fichiers, y compris les exécutables et les DLL, de trois façons : tables Lua indexées par
+monstre, lignes de texte tabulé, enregistrements binaires réguliers. Rien. Ce qui remontait était
+du faux, et instructif : `mappostable.txt` contient des coordonnées, les `navi_*distance.lub` des
+matrices de distances, les `.csv` de traduction du base64 — tous pleins de nombres qui tombent
+dans les tranches d'identifiants d'objets.
+
+La recherche binaire est depuis passée derrière `--binaire`, et il faut savoir pourquoi : son
+calcul de hasard suppose des octets quelconques. Un fichier réel ne l'est pas. Tables de sauts,
+listes de ressources et matrices sont faites de suites régulières d'entiers, qui franchissent
+n'importe quel seuil. Aucun réglage ne répare ça — c'est le modèle qui est faux, pas sa valeur.
+
 Les bases fan-made (RagnarokZero.net, Midgard Hub) annoncent toutes la même origine : le client
 **TW RO Zero**, en excluant explicitement les données kRO / iRO. C'est pourquoi importer un
 `mob_db` de rAthena serait une erreur : mauvaise lignée.

@@ -38,6 +38,8 @@ Options
       --exe               inclut les .exe et .dll de la racine du client
       --min <n>           objets distincts minimum pour signaler  (defaut : 3)
       --tout              fouille aussi les formats qui ne peuvent rien contenir
+      --binaire           cherche aussi dans les fichiers binaires (tres bruyant)
+      --urls              liste plutot les adresses web que le client contacte
       --max-taille <mo>   ignore les fichiers plus gros           (defaut : 64)
       --data <dossier>    ou lire l'oracle          (defaut : public/data)
       --verbose           dit ce qu'il ouvre, y compris les echecs
@@ -56,6 +58,8 @@ function parseArgs(argv) {
     else if (a === '--filtre') args.filtre = argv[++i].toLowerCase()
     else if (a === '--exe') args.exe = true
     else if (a === '--tout') args.tout = true
+    else if (a === '--binaire') args.binaire = true
+    else if (a === '--urls') args.urls = true
     else if (a === '--min') args.min = Number(argv[++i])
     else if (a === '--max-taille') args.maxTaille = Number(argv[++i]) * 1024 * 1024
     else if (a === '--data') args.data = path.resolve(argv[++i])
@@ -120,6 +124,7 @@ export function huntTextLines(texte, oracle, { min = MIN_OBJETS } = {}) {
   const trouve = []
   for (const ligne of texte.split(/\r?\n/)) {
     if (ligne.length < 20 || ligne.length > 4000) continue
+    if (!estLigneDeNombres(ligne)) continue
     const nombres = [...ligne.matchAll(/\d+/g)].map((m) => Number(m[0]))
     if (nombres.length < min + 1) continue
     const mob = nombres.find((n) => oracle.mobs.has(n))
@@ -128,6 +133,22 @@ export function huntTextLines(texte, oracle, { min = MIN_OBJETS } = {}) {
     if (objets.length >= min) trouve.push({ mob, objets, extrait: ligne.slice(0, 120) })
   }
   return trouve
+}
+
+/**
+ * Une ligne de table est faite de nombres et de separateurs, rien d'autre.
+ *
+ * Sans ce garde-fou, les fichiers de traduction du client ressortaient : leurs
+ * lignes contiennent du base64, ou les suites de chiffres abondent et tombent
+ * dans les tranches d'identifiants. De la prose et des mots longs ne sont pas
+ * une table, quels que soient les nombres qu'ils contiennent.
+ */
+export function estLigneDeNombres(ligne) {
+  // Une longue suite de lettres et de chiffres colles : c'est du base64, ou une
+  // empreinte. Un vrai fichier tabule a des noms courts entre ses nombres.
+  if (/[A-Za-z0-9+/]{16,}/.test(ligne)) return false
+  const chiffres = (ligne.match(/\d/g) || []).length
+  return chiffres >= ligne.length * 0.3
 }
 
 const estLua = (p) => /\.(lub|lua)$/i.test(p)
@@ -168,8 +189,16 @@ function fouiller(nom, buf, oracle, args) {
     return resultats
   }
 
-  // Binaire : exactement la meme recherche que dans une capture reseau, avec
-  // le meme seuil calcule. Ce qui vaut pour un flux vaut pour un fichier.
+  // Binaire : sur demande seulement, et il faut savoir pourquoi.
+  //
+  // Le calcul de hasard suppose des octets quelconques. Un fichier reel ne
+  // l'est pas : tables de sauts, listes de ressources, matrices de distances
+  // sont faites de suites regulieres d'entiers, et comme les identifiants
+  // d'objets sont denses par tranches, ces suites passent le seuil quel qu'il
+  // soit. Un balayage du client a rendu des centaines de "tables" jusque dans
+  // les DLL de Microsoft. Aucun seuil ne repare ca : c'est le modele qui est
+  // faux, pas son reglage.
+  if (!args.binaire) return resultats
   for (const table of findDropTables(buf, oracle, { minRun: args.seuil })) {
     if (table.count < args.min) continue
     resultats.push({
@@ -183,17 +212,84 @@ function fouiller(nom, buf, oracle, args) {
   return resultats
 }
 
+/**
+ * Adresses web contenues dans le client.
+ *
+ * Un client moderne ne garde pas tout dans ses fichiers : l'encyclopedie des
+ * monstres, la boutique, les evenements sont souvent servis par une adresse
+ * web appelee en cours de partie. Si une telle adresse existe, elle est ecrite
+ * quelque part — dans un Lua, dans un fichier de configuration, ou en dur dans
+ * l'executable. La lister, c'est repondre a la question "le client va-t-il
+ * chercher ses donnees ailleurs ?" par une preuve plutot que par une opinion.
+ */
+const MOTIF_URL = /https?:\/\/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]{4,200}/g
+
+export function huntUrls(buf) {
+  const out = new Set()
+  // Deux lectures. Un executable Windows range ses chaines en UTF-16 : un octet
+  // utile, un octet nul. Lue telle quelle, l'adresse ne ressemble a rien, car
+  // meme "http" n'y est pas d'un seul tenant. On relit donc en ne gardant qu'un
+  // octet sur deux, dans les deux alignements possibles.
+  for (const vue of [buf, deuxOctetsSurUn(buf, 0), deuxOctetsSurUn(buf, 1)]) {
+    for (const m of vue.toString('latin1').matchAll(MOTIF_URL)) {
+      const url = m[0].replace(/[.,;'")\]]+$/, '')
+      if (url.length > 10) out.add(url)
+    }
+  }
+  return [...out]
+}
+
+function deuxOctetsSurUn(buf, depart) {
+  const out = Buffer.alloc(Math.max(0, Math.ceil((buf.length - depart) / 2)))
+  for (let i = depart, j = 0; i < buf.length; i += 2, j++) out[j] = buf[i]
+  return out
+}
+
+function listerUrls(cibles, args) {
+  const parHote = new Map()
+  let lus = 0
+  for (const cible of cibles) {
+    let buf
+    try { buf = cible.lire() } catch { continue }
+    if (!buf || buf.length > args.maxTaille) continue
+    lus++
+    if (lus % 2000 === 0) process.stdout.write(`\r  ${lus} fichiers lus...   `)
+    for (const url of huntUrls(buf)) {
+      let hote
+      try { hote = new URL(url).host } catch { continue }
+      if (!parHote.has(hote)) parHote.set(hote, new Map())
+      const chemins = parHote.get(hote)
+      if (!chemins.has(url)) chemins.set(url, cible.nom)
+    }
+  }
+
+  process.stdout.write('\r')
+  console.log(`${lus} fichiers lus, ${parHote.size} hote(s) distinct(s).\n`)
+  for (const [hote, chemins] of [...parHote].sort((a, b) => b[1].size - a[1].size)) {
+    console.log(`${hote}  (${chemins.size} adresse(s))`)
+    for (const [url, fichier] of [...chemins].slice(0, 6)) {
+      console.log(`  ${url}`)
+      console.log(`      ${fichier}`)
+    }
+    if (chemins.size > 6) console.log(`  … et ${chemins.size - 6} autres`)
+  }
+  if (!parHote.size) {
+    console.log("Le client ne contient aucune adresse web : il ne va chercher ses donnees")
+    console.log('nulle part, tout ce qu\'il affiche vient de ses fichiers ou du serveur de jeu.')
+  }
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2))
   if (args.help) { console.log(HELP); return }
 
   const oracle = loadOracle(args.data)
-  if (!oracle.items.size || !oracle.mobs.size) {
+  if (!args.urls && (!oracle.items.size || !oracle.mobs.size)) {
     console.error("L'oracle est vide : lance d'abord `npm run extract`.")
     console.error('Sans la liste des objets et des monstres du client, rien ne peut etre juge.')
     process.exit(1)
   }
-  console.log(`Oracle : ${oracle.items.size} objets, ${oracle.mobs.size} monstres`)
+  if (!args.urls) console.log(`Oracle : ${oracle.items.size} objets, ${oracle.mobs.size} monstres`)
 
   const clientDir = resolveClientDir(args.client)
   const vfs = openClient(clientDir, { verbose: args.verbose })
@@ -209,13 +305,15 @@ function main() {
   // Le seuil se calcule sur tout le corpus, pas fichier par fichier. Juger
   // chaque fichier avec le meme budget de hasard, c'est accepter une fausse
   // table tous les cent fichiers — donc mille sur un client entier.
-  const octets = fichiers.reduce((n, f) => n + Math.min(f.size, args.maxTaille), 0)
+  const octets = args.urls ? 0 : fichiers.reduce((n, f) => n + Math.min(f.size, args.maxTaille), 0)
   const seuil = Math.max(
     minimumRun(octets, oracleDensity(oracle.items, 2)),
     minimumRun(octets, oracleDensity(oracle.items, 4)),
   )
-  console.log(`Corpus : ${(octets / 1024 / 1024 / 1024).toFixed(1)} Go — il faut ${seuil} ` +
-    `entrees consecutives pour que le hasard n'en produise pas une seule.`)
+  if (args.binaire) {
+    console.log(`Corpus : ${(octets / 1024 / 1024 / 1024).toFixed(1)} Go — il faut ${seuil} ` +
+      `entrees consecutives pour que le hasard n'en produise pas une seule.`)
+  }
   args.seuil = Number.isFinite(seuil) ? seuil : null
 
   const cibles = fichiers.map((f) => ({ nom: f.name, lire: () => vfs.read(f.name) }))
@@ -230,6 +328,8 @@ function main() {
   }
 
   console.log('')
+  if (args.urls) { listerUrls(cibles, args); return }
+
   let lus = 0
   let signales = 0
   for (const cible of cibles) {

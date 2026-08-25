@@ -216,3 +216,28 @@ test('des objets pris un peu partout restent une table possible', async () => {
   // Meme triee, une vraie table garde de grands ecarts.
   assert.equal(looksLikeCounter([501, 909, 1202, 4001, 7563]), false)
 })
+
+test('une ligne de base64 n est pas une ligne de table', async () => {
+  const { estLigneDeNombres } = await import('../tools/hunt-drops.mjs')
+  // Les fichiers de traduction du client ressortaient a cause de ca : leurs
+  // suites de chiffres tombent dans les tranches d'identifiants.
+  assert.equal(estLigneDeNombres('Cp8k,W+uvuOuLiO2Mn10K6re4656Y7IScIOyekeyXheydhCDtlZjroKTqs6Ag'), false)
+  assert.equal(estLigneDeNombres('1002,PORING,Poring,1,50,0,909,7000,501,800,4001,20'), true)
+  assert.equal(estLigneDeNombres('Une phrase ordinaire, sans le moindre chiffre dedans.'), false)
+})
+
+test('les adresses web du client sont retrouvees, y compris en UTF-16', async () => {
+  const { huntUrls } = await import('../tools/hunt-drops.mjs')
+  const utf16 = Buffer.from('https://data.example.com/api/mobs', 'utf16le')
+  const melange = Buffer.concat([
+    Buffer.from('bruit '), utf16, Buffer.from(' https://simple.example.com/x.json, suite'),
+  ])
+  const urls = huntUrls(melange)
+  assert.ok(urls.includes('https://data.example.com/api/mobs'), urls.join(' '))
+  assert.ok(urls.includes('https://simple.example.com/x.json'), urls.join(' '))
+})
+
+test('un texte sans adresse n en invente pas', async () => {
+  const { huntUrls } = await import('../tools/hunt-drops.mjs')
+  assert.deepEqual(huntUrls(Buffer.from('rien ici, http mais pas d adresse')), [])
+})
